@@ -96,8 +96,13 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #pane { display: flex; flex-direction: column; min-width: 0; }
 
 /* The list, with the reading pane beside it. */
-#list { flex: none; width: 430px; border-right: 1px solid var(--line); }
+#list { flex: none; width: var(--list-w, 430px); }
 #pane { flex: 1; }
+/* The line between them is a handle: a hairline to look at, a wider strip to grab. */
+#divider { flex: none; width: 1px; background: var(--line); position: relative; z-index: 3; cursor: col-resize; }
+#divider::before { content: ""; position: absolute; inset: 0 -4px; }
+#divider:hover, #divider.dragging { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+body.solo #divider { display: none; }
 body:not(.reading) #thread-bar { visibility: hidden; }
 
 /* A conversation in a window of its own: nothing but the conversation. */

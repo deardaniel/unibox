@@ -574,6 +574,39 @@ $("#thread-bar").addEventListener("click", e => {
   if (a === "window") openInWindow();
 });
 
+// ---- list width ------------------------------------------------------------
+const LIST_DEFAULT = 430, LIST_MIN = 260;
+function setListWidth(px, save) {
+  // leave the reading pane at least as much room as the narrowest list
+  const max = Math.max(LIST_MIN, $("#work").clientWidth - 360);
+  const w = Math.round(Math.max(LIST_MIN, Math.min(max, px)));
+  document.documentElement.style.setProperty("--list-w", w + "px");
+  if (save) store.set("list-width", w);
+}
+{
+  const d = $("#divider");
+  d.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    try { d.setPointerCapture(e.pointerId); } catch {}   // keeps the drag alive over the message frames
+    d.classList.add("dragging");
+    const left = $("#list").getBoundingClientRect().left;
+    const move = ev => setListWidth(ev.clientX - left, false);
+    const up = ev => {
+      setListWidth(ev.clientX - left, true);
+      d.classList.remove("dragging");
+      d.removeEventListener("pointermove", move);
+      d.removeEventListener("pointerup", up);
+      d.removeEventListener("pointercancel", up);
+    };
+    d.addEventListener("pointermove", move);
+    d.addEventListener("pointerup", up);
+    d.addEventListener("pointercancel", up);
+  });
+  d.addEventListener("dblclick", () => setListWidth(LIST_DEFAULT, true));
+  // a window made narrower must not leave the list wider than it allows
+  addEventListener("resize", () => setListWidth($("#list").getBoundingClientRect().width, false));
+}
+
 // ---- keyboard --------------------------------------------------------------
 let gPending = 0;
 function onKey(e) {
@@ -742,6 +775,7 @@ function listen() {
     listen();
     return;
   }
+  setListWidth(+store.get("list-width") || LIST_DEFAULT, false);
   await refresh();
   listen();
   api("/api/sync").then(setSync).catch(() => {});
