@@ -496,8 +496,13 @@ function ensureView(t) {
     state.views.set(k, v);
     return v;
   }
-  v = { key: k, account_id: t.account_id, thrid: t.thrid, messages: [], focus: 0, node: el("div", "view") };
+  v = { key: k, account_id: t.account_id, thrid: t.thrid, messages: [], focus: 0, placed: 0, node: el("div", "view") };
   v.node.append(el("h1", "", t.subject), el("div", "messages"));
+  v.node.addEventListener("scroll", () => {
+    if (state.open !== v) return;
+    clearTimeout(placeTimer);
+    placeTimer = setTimeout(() => { placeTimer = 0; notePlace(v); }, 250);
+  }, { passive: true });
   $("#views").append(v.node);
   state.views.set(k, v);
   for (const old of state.views.values()) {
@@ -546,9 +551,58 @@ async function loadView(v, peek) {
   if (state.open === v) updateThreadBar();
 }
 
+// ---- where you were in a conversation --------------------------------------
+// Scroll somewhere in a conversation and it opens there next time, also after a restart.
+// The place is kept as a message and a distance into it, so it holds whatever the messages
+// above it do. A new message arriving, or scrolling back to where the conversation opens
+// by itself, forgets it.
+const KEEP_PLACES = 300;
+let placeTimer = 0;
+function places() { try { return JSON.parse(store.get("places")) || {}; } catch { return {}; } }
+
+function notePlace(v) {
+  if (state.open !== v || !v.messages.length) return;
+  const all = places(), pane = v.node.getBoundingClientRect().top;
+  if (Math.abs(v.node.scrollTop - v.placed) <= 2) {
+    // put there by the app: either the remembered place itself, or the usual opening position
+    if (v.restored || !all[v.key]) return;
+    delete all[v.key];
+  } else {
+    const node = [...v.node.querySelectorAll(".msg")].find(n => n.getBoundingClientRect().bottom > pane + 1);
+    if (!node) return;
+    all[v.key] = { id: +node.dataset.id, off: Math.round(pane - node.getBoundingClientRect().top), last: v.messages.at(-1).id, at: Date.now() };
+    for (const k of Object.keys(all).sort((a, b) => all[b].at - all[a].at).slice(KEEP_PLACES)) delete all[k];
+  }
+  store.set("places", JSON.stringify(all));
+}
+
+/** Note the place now if a scroll is still waiting to be noted (the conversation is about to go). */
+function flushPlace() {
+  if (!placeTimer) return;
+  clearTimeout(placeTimer);
+  placeTimer = 0;
+  if (state.open) notePlace(state.open);
+}
+
+/** Scroll the open conversation back to its remembered place; false if it has none. */
+function restorePlace(v) {
+  const p = places()[v.key];
+  if (!p || p.last !== v.messages.at(-1)?.id) return false;
+  const node = v.node.querySelector(`.msg[data-id="${p.id}"]`), i = v.messages.findIndex(m => m.id === p.id);
+  if (!node || i < 0) return false;
+  if (node.classList.contains("closed") && p.off > node.offsetHeight) { node.classList.remove("closed"); fill(node, v.messages[i]); updateThreadBar(); }
+  v.focus = i;
+  v.node.scrollTop += node.getBoundingClientRect().top - v.node.getBoundingClientRect().top + p.off;
+  // a message still loading may be too short to reach the place yet; that is not the reader moving
+  v.placed = v.node.scrollTop;
+  v.restored = true;
+  return true;
+}
+
 let readTimer;
 function show(t) {
   clearTimeout(showTimer);
+  flushPlace();
   if (state.unreadOnly) state.kept.add(key(t));
   const v = ensureView(t);
   if (state.open !== v) {
@@ -560,13 +614,15 @@ function show(t) {
     markOpenRow();
     v.ready.then(() => {
       if (state.open !== v) return;
-      focusMessage(v.focus, false);
+      // where the reader left it, or else at its latest message
+      const place = () => restorePlace(v) || focusMessage(v.focus, false);
+      place();
       // the message is still being laid out and grows as it loads; keep it in place meanwhile,
       // unless the reader has scrolled somewhere themselves
       let at = v.node.scrollTop;
-      for (const ms of [120, 350, 800, 1500]) setTimeout(() => {
+      for (const ms of [120, 350, 800, 1500, 2500]) setTimeout(() => {
         if (state.open !== v || Math.abs(v.node.scrollTop - at) > 2) return;
-        focusMessage(v.focus, false);
+        place();
         at = v.node.scrollTop;
       }, ms);
       loadView(v, false).catch(() => {});   // now also ask Gmail whether there is more
@@ -578,6 +634,7 @@ function show(t) {
 }
 
 function hideView() {
+  flushPlace();
   clearTimeout(readTimer);
   state.open?.node.classList.remove("on");
   state.open = null;
@@ -1105,6 +1162,8 @@ function focusMessage(i, scroll = true) {
     box.dataset.room = room;
     box.style.paddingBottom = room ? `calc(60px + ${room}px)` : "";
   }
+  v.placed = top;
+  v.restored = false;
   v.node.scrollTo({ top, behavior: scroll ? "smooth" : "auto" });
   // a message opened by this step is still growing while the pane glides; land exactly afterwards
   clearTimeout(focusMessage.settle);

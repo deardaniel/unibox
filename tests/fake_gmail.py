@@ -199,6 +199,9 @@ def mailbox(owner):
         Booking 13030 - Payment for the afternoon of the party, including delivery and collection</td>
         <td width="8"></td><td align="right" valign="top" style="font-size:16px" id="price">&euro;185.00</td></tr></table>
         </td></tr></table>""")
+    # A long read, several screens tall, for trying the remembered reading position.
+    add(12, 11, frm="Works in Print <essays@longreads.example>", subject="The long essay: how the canal was dug", seen=True,
+        html="".join(f"<h2>Part {i + 1}</h2><p>" + f"Paragraph {i + 1} of the essay goes on at some length. " * 30 + "</p>" for i in range(40)))
     # FAKE_ROUTINE=3000 makes a long inbox, for trying the list at a realistic size
     for i in range(int(os.environ.get("FAKE_ROUTINE", "70"))):
         add(100 + i, 30 + i * 7, frm=f"Sender {i} <sender{i}@example.com>", subject=f"Routine message number {i}",
