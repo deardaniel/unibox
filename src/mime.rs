@@ -218,6 +218,7 @@ pub fn parts(raw: &[u8]) -> Parts {
 }
 
 /// The plain-text version of a message, as a document for the message frame.
+/// Web addresses in it become links.
 pub fn render_text(raw: &[u8]) -> String {
     static LINK: OnceLock<Regex> = OnceLock::new();
     let msg = MessageParser::default().parse(raw);
@@ -262,6 +263,11 @@ pub fn render_source(raw: &[u8]) -> String {
 /// The complete document shown in the message frame.
 pub fn render_html(raw: &[u8], message_id: i64) -> String {
     static CID: OnceLock<Regex> = OnceLock::new();
+    // A message written as plain text has no formatted version; show the text, with links.
+    let p = parts(raw);
+    if p.text && !p.html {
+        return render_text(raw);
+    }
     let body = MessageParser::default()
         .parse(raw)
         .and_then(|m| m.body_html(0).map(|h| h.into_owned()))
@@ -303,6 +309,14 @@ Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
         assert!(text.contains("</a>."), "the full stop is not part of the link");
         let source = render_source(msg);
         assert!(source.contains("Content-Type: multipart/alternative") && source.contains("&lt;p&gt;See"));
+    }
+
+    #[test]
+    fn plain_text_mail_gets_links() {
+        let msg = b"From: a@b.c\r\nSubject: s\r\n\r\nCancel here:\r\nhttps://booking.example.jp/info/475?site=e01&key=d9dee\r\n\r\nThanks\r\n";
+        let html = render_html(msg, 1);
+        assert!(html.contains("<a href=\"https://booking.example.jp/info/475?site=e01&amp;key=d9dee\">"), "{html}");
+        assert!(html.contains("Cancel here:"));
     }
 
     #[test]
