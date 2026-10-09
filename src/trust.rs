@@ -102,6 +102,21 @@ pub fn org(domain: &str) -> String {
     labels[n.saturating_sub(keep)..].join(".").to_lowercase()
 }
 
+/// Google Workspace signs for a customer who has not set up their own key with a domain of
+/// its own that spells the customer's with dashes: `daniel.ie` -> `daniel-ie.20230601.gappssmtp.com`.
+/// (Mail from a Google Group on that domain is signed this way.) Google only does so for a
+/// domain whose ownership it verified, so it vouches for the sender like the domain's own
+/// signature would. Only a two-label name with no dash of its own is accepted: with more
+/// dashes the spelling is ambiguous (`my-bank-com` is both `my.bank.com` and `my-bank.com`).
+fn workspace_signs_for(signer: &str, domain: &str) -> bool {
+    let labels: Vec<&str> = signer.split('.').collect();
+    let [name, date, "gappssmtp", "com"] = labels[..] else { return false };
+    date.chars().all(|c| c.is_ascii_digit())
+        && domain.matches('.').count() == 1
+        && !domain.contains('-')
+        && name == domain.replace('.', "-")
+}
+
 fn same_org(a: &str, b: &str) -> bool {
     !a.is_empty() && org(a) == org(b)
 }
@@ -175,7 +190,10 @@ pub fn assess(head: &[u8]) -> Trust {
         t.forwarded = record.contains("dmarc=pass") && after(record, "fromdomain=").is_some_and(|d| same_org(&d, &domain));
     }
 
-    let dkim_ok = t.dkim.iter().any(|d| d.result == "pass" && same_org(&d.domain, &domain));
+    let dkim_ok = t
+        .dkim
+        .iter()
+        .any(|d| d.result == "pass" && (same_org(&d.domain, &domain) || workspace_signs_for(&d.domain, &domain)));
     let spf_ok = t.spf == "pass" && same_org(&t.spf_domain, &domain);
     let other_signer = t.dkim.iter().find(|d| d.result == "pass").map(|d| d.domain.clone());
     let shown = if domain.is_empty() { "the sender".to_string() } else { domain.clone() };
@@ -295,6 +313,29 @@ mod tests {
         assert_eq!(t.level, "none");
         // none at all: mail you sent
         assert_eq!(assess(&msg("", "From: me@example.com")).level, "none");
+    }
+
+    #[test]
+    fn google_workspace_default_signature() {
+        // a Google Group on the sender's own Workspace domain, which publishes no DMARC record
+        let group = |from: &str| {
+            assess(&msg(
+                "Authentication-Results: mx.google.com;\r\n dkim=pass header.i=@daniel-ie.20230601.gappssmtp.com header.s=20230601 header.b=x;\r\n \
+                 arc=pass (i=2 spf=pass spfdomain=example.com dkim=pass dkdomain=example.com dmarc=pass fromdomain=example.com);\r\n \
+                 spf=neutral (google.com: 1.2.3.4 is neither permitted nor denied) smtp.mailfrom=kids+bnc@daniel.ie\r\n",
+                from,
+            ))
+        };
+        assert_eq!(group("From: \"'Teacher' via Kids\" <kids@daniel.ie>").level, "verified");
+        // the same signature says nothing about any other domain
+        assert_eq!(group("From: x@daniel.com").level, "unverified");
+        assert_eq!(group("From: x@daniel-ie.com").level, "unverified");
+        assert!(workspace_signs_for("daniel-ie.20230601.gappssmtp.com", "daniel.ie"));
+        // ambiguous spellings are not accepted
+        assert!(!workspace_signs_for("my-bank-com.20230601.gappssmtp.com", "my.bank.com"));
+        assert!(!workspace_signs_for("my-bank-com.20230601.gappssmtp.com", "my-bank.com"));
+        assert!(!workspace_signs_for("daniel-ie.evil.gappssmtp.com", "daniel.ie"));
+        assert!(!workspace_signs_for("daniel-ie.20230601.gappssmtp.com.evil.example", "daniel.ie"));
     }
 
     #[test]
