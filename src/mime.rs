@@ -58,6 +58,9 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
         .to_ascii_lowercase()
 }
 
+/// Bump when `summarize` changes, so stored messages are summarised again at startup.
+pub const SUMMARY_VERSION: &str = "2";
+
 /// What we keep alongside the raw message for the list view and for search.
 pub struct Summary {
     pub snippet: String,
@@ -71,8 +74,13 @@ pub fn summarize(raw: &[u8]) -> Summary {
         return Summary { snippet: String::new(), text: String::new(), attachments: "[]".into() };
     };
     let mut text = msg.body_text(0).map(|t| t.into_owned()).unwrap_or_default();
-    // Plenty of HTML mail ships a throwaway plain-text part ("view this in a browser").
-    if text.trim().len() < 80 {
+    // Plenty of HTML mail ships a throwaway plain-text part ("view this in a browser"),
+    // and some put raw markup in it.
+    static MARKUP: OnceLock<Regex> = OnceLock::new();
+    let looks_like_markup = re(&MARKUP, r"(?i)^\s*<(!doctype|!--|html|head|link|meta|style|body|div|table|p|span)\b")
+        .is_match(&text)
+        || text.matches("</").count() > 10;
+    if text.trim().len() < 80 || looks_like_markup {
         if let Some(html) = msg.html_body.first().and_then(|_| msg.body_html(0)) {
             static CODE: OnceLock<Regex> = OnceLock::new();
             let code = re(&CODE, r"(?is)<script\b.*?</script>|<style\b.*?</style>|<head\b.*?</head>");
@@ -82,9 +90,11 @@ pub fn summarize(raw: &[u8]) -> Summary {
             let spaced = code.replace_all(&html, " ");
             let spaced = block.replace_all(&spaced, " <$1");
             let from_html = mail_parser::decoders::html::html_to_text(&spaced);
-            if from_html.trim().len() > text.trim().len() {
+            if looks_like_markup || from_html.trim().len() > text.trim().len() {
                 text = from_html;
             }
+        } else if looks_like_markup {
+            text = mail_parser::decoders::html::html_to_text(&text);
         }
     }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -92,11 +102,6 @@ pub fn summarize(raw: &[u8]) -> Summary {
     let snippet: String = text.chars().take(220).collect();
     let attachments = serde_json::to_string(&list_attachments(&msg)).unwrap_or_else(|_| "[]".into());
     Summary { snippet, text, attachments }
-}
-
-pub fn attachments_json(raw: &[u8]) -> String {
-    let list = MessageParser::default().parse(raw).map(|m| list_attachments(&m)).unwrap_or_default();
-    serde_json::to_string(&list).unwrap_or_else(|_| "[]".into())
 }
 
 /// Inline images carry a Content-ID and are not what people mean by "attachment".
@@ -154,6 +159,8 @@ fn sanitize(html: &str) -> String {
     let mut b = ammonia::Builder::default();
     b.add_tags(["style", "center", "font", "u", "s", "section", "article", "header", "footer", "main", "nav"]);
     b.rm_clean_content_tags(["style"]);
+    // A <title> is not for display; without this its text lands at the top of the message.
+    b.clean_content_tags(["script", "title", "noscript", "template"].into());
     b.add_generic_attributes([
         "style", "class", "id", "align", "valign", "bgcolor", "background", "border", "cellpadding", "cellspacing",
         "color", "face", "size", "width", "height", "dir", "lang", "title", "role", "nowrap",
@@ -168,7 +175,8 @@ fn sanitize(html: &str) -> String {
 }
 
 const FRAME_CSS: &str = "
-html,body{height:auto!important;min-height:0!important;overflow:hidden!important}
+html,body{height:auto!important;min-height:0!important}
+html{overflow-x:auto!important;overflow-y:hidden!important}
 body{margin:0!important;padding:12px 16px!important;background:#fff;color:#111;
      font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
      -webkit-text-size-adjust:100%;overflow-wrap:anywhere}
@@ -234,8 +242,20 @@ Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b1--\r\n";
     }
 
     #[test]
+    fn title_text_is_not_shown_and_markup_in_plain_part_is_not_a_preview() {
+        let msg = b"From: a@b.c\r\nSubject: s\r\nMIME-Version: 1.0\r\n\
+Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
+--b1\r\nContent-Type: text/plain\r\n\r\n\r\n\r\n<link rel=stylesheet href=https://cdn.example/x.css>\r\n<div>ignored</div>\r\n\
+--b1\r\nContent-Type: text/html\r\n\r\n\
+<html><head><title>Hidden Title</title></head><body><p>The world's most innovative countries</p></body></html>\r\n--b1--\r\n";
+        assert!(!render_html(msg, 1).contains("Hidden Title"));
+        let s = summarize(msg);
+        assert!(s.snippet.starts_with("The world"), "got {:?}", s.snippet);
+    }
+
+    #[test]
     fn attachments_exclude_inline_images() {
-        let list: serde_json::Value = serde_json::from_str(&attachments_json(MSG)).unwrap();
+        let list: serde_json::Value = serde_json::from_str(&summarize(MSG).attachments).unwrap();
         assert_eq!(list.as_array().unwrap().len(), 1);
         assert_eq!(list[0]["name"], "report.pdf");
         assert_eq!(list[0]["mime"], "application/pdf");

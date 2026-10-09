@@ -84,7 +84,7 @@ impl App {
         *self.wake.lock().unwrap() = Some(tx);
         let app = self.clone();
         std::thread::spawn(move || {
-            app.backfill_attachments();
+            app.refresh_summaries();
             loop {
                 let mut more = false;
                 for acct in app.db.accounts().unwrap_or_default() {
@@ -104,12 +104,29 @@ impl App {
         });
     }
 
-    /// Messages stored before attachment lists were kept alongside them.
-    fn backfill_attachments(&self) {
-        for id in self.db.bodies_missing_attachments().unwrap_or_default() {
-            if let Ok(Some(raw)) = self.db.raw_body(id) {
-                let _ = self.db.set_attachments(id, &mime::attachments_json(&raw));
+    /// Previews, search text and attachment lists are worked out when a body is stored.
+    /// When the way they are worked out changes, redo them for everything already held.
+    fn refresh_summaries(&self) {
+        let work = || -> Result<()> {
+            if self.db.meta("summary_version")?.as_deref() == Some(mime::SUMMARY_VERSION) {
+                return Ok(());
             }
+            for chunk in self.db.stored_bodies()?.chunks(100) {
+                let mut c = self.db.conn()?;
+                let tx = c.transaction()?;
+                for &id in chunk {
+                    let raw: Vec<u8> = tx.query_row("SELECT raw FROM bodies WHERE message_id=?", [id], |r| r.get(0))?;
+                    let s = mime::summarize(&raw);
+                    Db::set_summary(&tx, id, &s.snippet, &s.text, &s.attachments)?;
+                }
+                tx.commit()?;
+            }
+            self.db.set_meta("summary_version", mime::SUMMARY_VERSION)?;
+            self.emit("changed", "");
+            Ok(())
+        };
+        if let Err(e) = work() {
+            eprintln!("refreshing summaries: {e:#}");
         }
     }
 

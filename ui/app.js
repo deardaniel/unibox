@@ -31,6 +31,8 @@ const state = {
 const key = t => t.account_id + ":" + t.thrid;
 const account = id => state.accounts.find(a => a.id === id);
 const dark = matchMedia("(prefers-color-scheme: dark)");
+/** Set when this window shows a single conversation: "account:thread". */
+const SOLO = new URLSearchParams(location.search).get("thread");
 
 async function api(path, opts = {}) {
   if (opts.body) { opts.method ??= "POST"; opts.headers = { "Content-Type": "application/json" }; opts.body = JSON.stringify(opts.body); }
@@ -213,7 +215,11 @@ function renderList() {
     if (t.has_attach) marks.append("📎");
     if (t.starred) marks.append(el("span", "star", "★"));
     row.append(el("span", "bar"), av, who, text, marks, el("span", "date", fmtDate(t.date)));
-    row.onclick = () => { setCursor(i); show(t); };
+    row.onclick = e => {
+      if (e.ctrlKey || e.metaKey) return openInWindow(t);
+      setCursor(i);
+      show(t);
+    };
     // Start rendering as soon as the pointer rests on a row, so a click opens it instantly.
     row.onmouseenter = () => { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => ensureView(t), 70); };
     row.onmouseleave = () => clearTimeout(hoverTimer);
@@ -279,6 +285,8 @@ function ensureView(t) {
     if (old !== state.open && old !== v) dropView(old);
   }
   v.ready = loadView(v, true).catch(() => {});
+  // Give the frames a moment to load and lay out, then stop tracking window resizes.
+  v.ready.then(() => setTimeout(() => v.node.classList.add("parked"), 1500));
   return v;
 }
 
@@ -309,6 +317,7 @@ async function loadView(v, peek) {
     else box.insertBefore(fresh, box.children[i] || null);
   });
   if (v.messages[0]) v.node.querySelector("h1").textContent = v.messages[0].subject.replace(/^(re|fwd?):\s*/i, "") || v.messages[0].subject;
+  if (SOLO) document.title = v.node.querySelector("h1").textContent + " – Unibox";
   if (state.open === v) updateThreadBar();
 }
 
@@ -374,7 +383,18 @@ function fill(node, m) {
     const doc = f.contentDocument;
     if (!doc) return;
     const root = doc.documentElement;
-    const fit = () => { f.style.height = Math.ceil(root.getBoundingClientRect().height) + "px"; };
+    // Mail laid out for a fixed width can be a little wider than the pane. Shrink it to fit
+    // rather than cut it off; if it would need to shrink a lot, it scrolls sideways instead.
+    let fittedFor = 0;
+    const fit = () => {
+      if (root.clientWidth && root.clientWidth !== fittedFor) {
+        fittedFor = root.clientWidth;
+        doc.body.style.zoom = "";
+        const scale = root.clientWidth / root.scrollWidth;
+        if (scale < 1 && scale > 0.6) doc.body.style.zoom = scale;
+      }
+      f.style.height = Math.ceil(root.getBoundingClientRect().height) + "px";
+    };
     fit();
     new ResizeObserver(fit).observe(root);
     root.classList.toggle("dk", dark.matches);
@@ -395,7 +415,14 @@ function fill(node, m) {
       const link = el("a", "file");
       link.href = `/api/message/${m.id}/attachment/${a.index}`;
       link.download = a.name;
-      link.title = `${a.name} (${a.mime})`;
+      link.title = `${a.name} (${a.mime}): save to Downloads`;
+      // Saved straight into Downloads and shown there; a plain download is the fallback.
+      link.onclick = e => {
+        e.preventDefault();
+        api(link.href + "/save", { method: "POST" })
+          .then(r => toast("Saved to " + r.path))
+          .catch(() => { link.onclick = null; link.click(); });
+      };
       link.append(el("span", "fn", "📎 " + a.name), el("span", "sz", fmtSize(a.size)));
       files.append(link);
     }
@@ -423,6 +450,17 @@ function focusMessage(i, scroll = true) {
 function updateThreadBar() {
   const starred = state.open?.messages.some(m => m.starred);
   $('#thread-bar [data-act="star"]').textContent = starred ? "★ Starred" : "Star";
+}
+
+function openInWindow(t = state.open || state.threads[state.cursor]) {
+  if (!t) return;
+  api("/api/window", { body: { account_id: t.account_id, thrid: t.thrid } })
+    // in a plain browser (development) a popup stands in for the app window
+    .catch(() => window.open(`/?thread=${t.account_id}:${t.thrid}`, "_blank", "popup,width=920,height=860"));
+}
+
+function closeWindow() {
+  window.ipc ? window.ipc.postMessage("close") : window.close();
 }
 
 function replyInGmail() {
@@ -467,6 +505,7 @@ function act(op, list = targets()) {
 /** After archiving or marking unread: in the pane move on to the next conversation,
  *  in the full-width list go back to the list. */
 function leaveConversation() {
+  if (SOLO) return closeWindow();
   const next = state.threads[state.cursor];
   if (state.split && next) show(next);
   else hideView();
@@ -478,7 +517,8 @@ function archive() { act("archive"); leaveConversation(); }
 function markUnread() {
   clearTimeout(readTimer);
   act("unread");
-  if (!state.split) hideView();
+  if (SOLO) closeWindow();
+  else if (!state.split) hideView();
 }
 
 function toggleStar() {
@@ -508,6 +548,7 @@ $("#thread-bar").addEventListener("click", e => {
   if (a === "unread") markUnread();
   if (a === "star") toggleStar();
   if (a === "reply") replyInGmail();
+  if (a === "window") openInWindow();
 });
 
 function setLayout(split) {
@@ -530,6 +571,15 @@ function onKey(e) {
     return;
   }
   const k = e.key;
+  if (SOLO) {
+    // One conversation, no list: only the keys that make sense here.
+    const solo = { n: () => focusMessage(state.open.focus + 1), p: () => focusMessage(state.open.focus - 1),
+      e: archive, s: toggleStar, U: markUnread, r: replyInGmail, Escape: closeWindow, u: closeWindow,
+      "?": () => $("#help-dialog").showModal() }[k];
+    if (solo && state.open) { solo(); e.preventDefault(); }
+    return;
+  }
+  if (k === "Enter" && e.shiftKey) { openInWindow(); return e.preventDefault(); }
   // "Inside" a conversation only exists in the full-width layout; in the pane the list stays live.
   const inside = !!state.open && !state.split;
   if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; setFilter(null); return e.preventDefault(); }
@@ -646,6 +696,7 @@ function listen() {
   es.onmessage = e => {
     const ev = JSON.parse(e.data);
     if (ev.kind === "error") return toast(ev.detail);
+    if (SOLO) { if (state.open) loadView(state.open, true).catch(() => {}); return; }
     if (ev.kind === "thread") {
       for (const v of state.views.values()) if (v.thrid === ev.detail) loadView(v, true).catch(() => {});
     }
@@ -654,6 +705,18 @@ function listen() {
 }
 
 (async () => {
+  if (SOLO) {
+    const [account_id, thrid] = SOLO.split(":");
+    document.body.classList.add("solo");
+    state.split = false;
+    state.accounts = await api("/api/accounts");
+    const t = { account_id: +account_id, thrid, subject: "" };
+    show(t);
+    await state.open.ready;
+    if (state.open.messages.some(m => !m.seen)) act("read", [t]);
+    listen();
+    return;
+  }
   setLayout(state.split);
   await refresh();
   listen();

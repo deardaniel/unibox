@@ -122,7 +122,8 @@ impl Db {
              CREATE TABLE IF NOT EXISTS hydrated(
                account_id INTEGER NOT NULL,
                gm_thrid TEXT NOT NULL,
-               PRIMARY KEY(account_id, gm_thrid));",
+               PRIMARY KEY(account_id, gm_thrid));
+             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);",
         )?;
         let has_column = |name: &str| -> Result<bool> {
             let mut st = c.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name=?")?;
@@ -348,18 +349,28 @@ impl Db {
         Ok(out)
     }
 
-    /// Stored messages that predate the attachments column: (id, raw).
-    pub fn bodies_missing_attachments(&self) -> Result<Vec<i64>> {
+    pub fn meta(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.conn()?.query_row("SELECT value FROM meta WHERE key=?", [key], |r| r.get(0)).optional()?)
+    }
+
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn()?.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", params![key, value])?;
+        Ok(())
+    }
+
+    /// Ids of every message whose body is stored.
+    pub fn stored_bodies(&self) -> Result<Vec<i64>> {
         let c = self.conn()?;
-        let mut st = c.prepare("SELECT id FROM messages WHERE has_body=1 AND attachments IS NULL")?;
+        let mut st = c.prepare("SELECT message_id FROM bodies")?;
         let rows = st.query_map([], |r| r.get(0))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn set_attachments(&self, message_id: i64, attachments: &str) -> Result<()> {
-        self.conn()?.execute(
-            "UPDATE messages SET attachments=?, has_attach=? WHERE id=?",
-            params![attachments, attachments != "[]", message_id],
+    /// Replace what was derived from a stored body (preview, search text, attachment list).
+    pub fn set_summary(c: &Connection, message_id: i64, snippet: &str, body_text: &str, attachments: &str) -> Result<()> {
+        c.execute(
+            "UPDATE messages SET snippet=?, body_text=?, attachments=?, has_attach=? WHERE id=?",
+            params![snippet, body_text, attachments, attachments != "[]", message_id],
         )?;
         Ok(())
     }

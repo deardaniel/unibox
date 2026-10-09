@@ -12,8 +12,8 @@ conversation in Gmail.
 ## How it works
 
 `unibox.exe` is a Rust program that syncs each account over IMAP and serves the UI on
-`127.0.0.1:47821`. It shows that UI in a chromeless Edge window with its own profile and
-exits a few seconds after the last window is closed. Sync runs every two minutes while it is open.
+`127.0.0.1:47821`. It shows that UI in its own window (tao + wry, hosting the WebView2
+runtime that ships with Windows) and exits when the main window is closed. Sync runs every two minutes while it is open.
 
 Gmail accounts are added in the app with an [app password](https://myaccount.google.com/apppasswords)
 (needs 2-Step Verification; Workspace admins must allow IMAP).

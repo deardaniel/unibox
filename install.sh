@@ -17,9 +17,26 @@ $SYS/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command '
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' >/dev/null 2>&1 || true
 sleep 1
 cp target/x86_64-pc-windows-gnullvm/release/unibox.exe "$DEST/unibox.exe"
+# the Edge profile from when the window was an Edge app window
+rm -rf "$LOCAL/Unibox/window"
+# An icon for the Start Menu shortcut (the window draws its own). Needs Pillow; skipped without it.
+python3 -I - "$DEST/unibox.ico" <<'PY' 2>/dev/null || true
+import sys
+from PIL import Image, ImageDraw
+S = 256
+im = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+d = ImageDraw.Draw(im)
+d.rounded_rectangle((0, 0, S - 1, S - 1), radius=56, fill=(0x5B, 0x2E, 0xE8, 255))
+d.rounded_rectangle((56, 84, 200, 176), radius=6, outline="white", width=16)
+d.line((60, 90, 128, 140, 196, 90), fill="white", width=16, joint="curve")
+im.save(sys.argv[1], sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)])
+PY
 $SYS/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command '
   $exe = Join-Path $env:LOCALAPPDATA "Programs\Unibox\unibox.exe"
   $lnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Unibox.lnk"
   $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
-  $s.TargetPath = $exe; $s.WorkingDirectory = Split-Path $exe; $s.Description = "Unified Gmail inbox"; $s.Save()
+  $s.TargetPath = $exe; $s.WorkingDirectory = Split-Path $exe; $s.Description = "Unified Gmail inbox"
+  $ico = Join-Path (Split-Path $exe) "unibox.ico"
+  if (Test-Path $ico) { $s.IconLocation = $ico }
+  $s.Save()
   Write-Output "Installed $exe"'

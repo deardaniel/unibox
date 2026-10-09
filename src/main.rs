@@ -66,7 +66,7 @@ fn asset(name: &str, built_in: &'static str) -> String {
 }
 
 /// Bump when the way messages are rendered changes, so cached copies in the window are dropped.
-const RENDER_VERSION: &str = "2";
+const RENDER_VERSION: &str = "3";
 
 async fn index() -> impl IntoResponse {
     let html = asset("index.html", include_str!("../ui/index.html")).replace("__BUILD__", RENDER_VERSION);
@@ -250,20 +250,84 @@ struct OpenUrl {
 /// because this string ends up on a command line.
 async fn open_url(Json(body): Json<OpenUrl>) -> Api<StatusCode> {
     let url = body.url.trim();
-    let ok_scheme = ["https://", "http://", "mailto:"].iter().any(|s| url.to_ascii_lowercase().starts_with(s));
-    if !ok_scheme || url.len() > 4000 || url.chars().any(|c| c.is_control() || c == '"' || c.is_whitespace()) {
+    if !is_external_link(url) {
         return Err(ApiError(StatusCode::BAD_REQUEST, "unsupported link".into()));
     }
     #[cfg(windows)]
     {
-        std::process::Command::new("rundll32.exe")
-            .args(["url.dll,FileProtocolHandler", url])
-            .spawn()
-            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        open_external(url).map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(StatusCode::NO_CONTENT)
     }
     #[cfg(not(windows))]
     Err(ApiError(StatusCode::NOT_IMPLEMENTED, "no system browser here".into()))
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct ThreadRef {
+    account_id: i64,
+    thrid: String,
+}
+
+/// Open one conversation in a window of its own.
+async fn open_thread_window(headers: HeaderMap, Json(t): Json<ThreadRef>) -> Api<StatusCode> {
+    if !t.thrid.chars().all(|c| c.is_ascii_digit()) {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "bad thread id".into()));
+    }
+    #[cfg(windows)]
+    {
+        // local_only has already checked that Host is this server
+        let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or_default();
+        window::open(format!("http://{host}/?thread={}:{}", t.account_id, t.thrid));
+        Ok(StatusCode::NO_CONTENT)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = headers;
+        Err(ApiError(StatusCode::NOT_IMPLEMENTED, "no native windows here".into()))
+    }
+}
+
+async fn focus_window() -> StatusCode {
+    #[cfg(windows)]
+    window::focus();
+    StatusCode::NO_CONTENT
+}
+
+/// Save an attachment into the Downloads folder and show it there. The app window has
+/// no download bar of its own, and this never opens the file, so nothing runs by surprise.
+async fn save_attachment(State(app): State<Arc<App>>, Path((id, index)): Path<(i64, usize)>) -> Api<Json<serde_json::Value>> {
+    let saved = blocking(move || {
+        let Some((name, _, bytes)) = app.db.raw_body(id)?.and_then(|raw| mime::attachment(&raw, index)) else {
+            return Ok(None);
+        };
+        let dir = dirs::download_dir().ok_or_else(|| anyhow::anyhow!("no Downloads folder"))?;
+        // Keep only a plain file name: no folders, no characters Windows rejects.
+        let clean: String = name
+            .chars()
+            .map(|c| if c.is_control() || "\\/:*?\"<>|".contains(c) { '_' } else { c })
+            .collect();
+        let clean = clean.trim_matches(|c| c == '.' || c == ' ').to_string();
+        let clean = if clean.is_empty() { "attachment".to_string() } else { clean };
+        let (stem, ext) = match clean.rsplit_once('.') {
+            Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+            _ => (clean.clone(), String::new()),
+        };
+        let mut path = dir.join(&clean);
+        let mut n = 1;
+        while path.exists() {
+            path = dir.join(format!("{stem} ({n}){ext}"));
+            n += 1;
+        }
+        std::fs::write(&path, bytes)?;
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{}", path.display())).spawn();
+        }
+        Ok(Some(path.display().to_string()))
+    })
+    .await?;
+    Ok(Json(serde_json::json!({ "path": saved.ok_or_else(not_found)? })))
 }
 
 async fn events(State(app): State<Arc<App>>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
@@ -304,53 +368,190 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/sync", post(sync_now))
+        .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/open", post(open_url))
+        .route("/api/focus", post(focus_window))
+        .route("/api/window", post(open_thread_window))
         .route("/api/events", get(events))
         .layer(middleware::from_fn(local_only))
         .with_state(app)
 }
 
 // ---- window --------------------------------------------------------------
-/// Show the UI in a chromeless Edge (or Chrome) window with its own profile.
+/// Only web and mail links may be handed to the system, because the string ends up on a command line.
+fn is_external_link(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    ["https://", "http://", "mailto:"].iter().any(|s| lower.starts_with(s))
+        && url.len() <= 4000
+        && !url.chars().any(|c| c.is_control() || c == '"' || c.is_whitespace())
+}
+
 #[cfg(windows)]
-fn open_window(url: &str, dir: &std::path::Path) {
-    let roots = ["ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"];
-    let exes = ["Microsoft\\Edge\\Application\\msedge.exe", "Google\\Chrome\\Application\\chrome.exe"];
-    for exe in exes {
-        for root in roots {
-            let Ok(base) = std::env::var(root) else { continue };
-            let path = PathBuf::from(base).join(exe);
-            if !path.exists() {
-                continue;
-            }
-            let child = std::process::Command::new(path)
-                .arg(format!("--app={url}"))
-                .arg(format!("--user-data-dir={}", dir.join("window").display()))
-                .args(["--no-first-run", "--no-default-browser-check", "--disable-background-mode"])
-                .arg("--window-size=1280,860")
-                .spawn();
-            if child.is_ok() {
-                return;
-            }
+fn open_external(url: &str) -> std::io::Result<()> {
+    std::process::Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]).spawn().map(drop)
+}
+
+#[cfg(windows)]
+mod window {
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::{Mutex, OnceLock};
+    use tao::dpi::LogicalSize;
+    use tao::event::{Event, WindowEvent};
+    use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
+    use tao::window::{Icon, Theme, Window, WindowBuilder, WindowId};
+    use wry::{NewWindowResponse, WebContext, WebView, WebViewBuilder};
+
+    pub enum UserEvent {
+        /// Bring the main window to the front.
+        Focus,
+        /// Open another window on this URL (a single conversation).
+        Open(String),
+        Title(WindowId, String),
+        Close(WindowId),
+    }
+    static PROXY: OnceLock<Mutex<EventLoopProxy<UserEvent>>> = OnceLock::new();
+
+    fn send(event: UserEvent) {
+        if let Some(p) = PROXY.get() {
+            let _ = p.lock().unwrap().send_event(event);
         }
     }
-    let _ = std::process::Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]).spawn();
+    pub fn focus() {
+        send(UserEvent::Focus);
+    }
+    pub fn open(url: String) {
+        send(UserEvent::Open(url));
+    }
+
+    /// The app icon, drawn here so the binary needs no image files: an envelope on a purple tile.
+    fn icon() -> Option<Icon> {
+        const N: i32 = 64;
+        let dist = |px: f32, py: f32, a: (f32, f32), b: (f32, f32)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+            ((px - a.0 - t * dx).powi(2) + (py - a.1 - t * dy).powi(2)).sqrt()
+        };
+        let (l, t, r, b) = (14.0, 21.0, 50.0, 44.0);
+        let strokes = [
+            ((l, t), (r, t)), ((r, t), (r, b)), ((r, b), (l, b)), ((l, b), (l, t)),
+            ((l, t), (32.0, 35.0)), ((32.0, 35.0), (r, t)),
+        ];
+        let mut rgba = Vec::with_capacity((N * N * 4) as usize);
+        for y in 0..N {
+            for x in 0..N {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                // rounded square: distance from the nearest corner centre
+                let (cx, cy) = (px.clamp(13.0, 51.0), py.clamp(13.0, 51.0));
+                let inside = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt() <= 13.0;
+                let on_line = strokes.iter().any(|(p, q)| dist(px, py, *p, *q) <= 2.0);
+                rgba.extend_from_slice(match (inside, on_line) {
+                    (false, _) => &[0, 0, 0, 0],
+                    (true, true) => &[255, 255, 255, 255],
+                    (true, false) => &[0x5b, 0x2e, 0xe8, 255],
+                });
+            }
+        }
+        Icon::from_rgba(rgba, N as u32, N as u32).ok()
+    }
+
+    /// One app window showing `url`. The web view is listed first so it is dropped first.
+    fn make_window(
+        target: &EventLoopWindowTarget<UserEvent>,
+        context: &mut WebContext,
+        origin: &str,
+        url: &str,
+        size: (f64, f64),
+    ) -> anyhow::Result<(WebView, Window)> {
+        let window = WindowBuilder::new()
+            .with_title("Unibox")
+            .with_inner_size(LogicalSize::new(size.0, size.1))
+            .with_min_inner_size(LogicalSize::new(560.0, 400.0))
+            .with_window_icon(icon())
+            .build(target)?;
+        let id = window.id();
+        // Match the page colour so a resize never flashes white around the edges.
+        let background = if window.theme() == Theme::Dark { (0x13, 0x13, 0x13, 255) } else { (0xf6, 0xf5, 0xf2, 255) };
+        let origin = origin.to_string();
+        let webview = WebViewBuilder::new_with_web_context(context)
+            .with_url(url)
+            .with_background_color(background)
+            // Pages never open windows themselves; outside links go to the real browser.
+            .with_new_window_req_handler(|target, _| {
+                if super::is_external_link(&target) {
+                    let _ = super::open_external(&target);
+                }
+                NewWindowResponse::Deny
+            })
+            // A window only ever shows the app.
+            .with_navigation_handler(move |target| {
+                target.starts_with(&origin) || target.starts_with("about:") || target.starts_with("data:")
+            })
+            .with_document_title_changed_handler(move |title| send(UserEvent::Title(id, title)))
+            // The page asks to be closed with window.ipc.postMessage("close").
+            .with_ipc_handler(move |request| {
+                if request.body() == "close" {
+                    send(UserEvent::Close(id));
+                }
+            })
+            .build(&window)?;
+        Ok((webview, window))
+    }
+
+    /// Show the UI in a window of its own and run until that window is closed. Returns an
+    /// error only if the window could not be created at all.
+    pub fn run(url: &str, dir: &Path) -> anyhow::Result<()> {
+        let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+        let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
+        let mut context = WebContext::new(Some(dir.join("webview")));
+        let origin = url.to_string();
+        let main = make_window(&event_loop, &mut context, &origin, url, (1320.0, 880.0))?;
+        let main_id = main.1.id();
+        let mut windows: HashMap<WindowId, (WebView, Window)> = HashMap::from([(main_id, main)]);
+        event_loop.run(move |event, target, control_flow| {
+            *control_flow = ControlFlow::Wait;
+            match event {
+                Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. } => {
+                    if window_id == main_id {
+                        *control_flow = ControlFlow::Exit;
+                    } else {
+                        windows.remove(&window_id);
+                    }
+                }
+                Event::UserEvent(UserEvent::Focus) => {
+                    if let Some((_, w)) = windows.get(&main_id) {
+                        w.set_minimized(false);
+                        w.set_focus();
+                    }
+                }
+                Event::UserEvent(UserEvent::Open(url)) => {
+                    match make_window(target, &mut context, &origin, &url, (920.0, 860.0)) {
+                        Ok(w) => drop(windows.insert(w.1.id(), w)),
+                        Err(e) => eprintln!("window: {e:#}"),
+                    }
+                }
+                Event::UserEvent(UserEvent::Title(id, title)) => {
+                    if let Some((_, w)) = windows.get(&id) {
+                        w.set_title(&title);
+                    }
+                }
+                Event::UserEvent(UserEvent::Close(id)) if id != main_id => drop(windows.remove(&id)),
+                _ => {}
+            }
+        })
+    }
 }
 
-#[cfg(not(windows))]
-fn open_window(url: &str, _dir: &std::path::Path) {
-    println!("Unibox is running at {url}");
-}
-
-/// Resolves once no window has been connected for a little while. The browser process
-/// we start is no guide: if that profile is already running it hands over and exits at
-/// once. An open window always holds /api/events, so that is what we watch.
-async fn until_windows_close(app: Arc<App>) {
-    tokio::time::sleep(std::time::Duration::from_secs(20)).await; // time for the window to come up
-    let mut idle = 0;
-    while idle < 5 {
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        idle = if app.events.receiver_count() == 0 { idle + 1 } else { 0 };
+/// Tell the copy that is already running to come to the front.
+fn focus_running_instance(port: u16) {
+    use std::io::{Read, Write};
+    if let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+        let host = format!("127.0.0.1:{port}");
+        let _ = write!(
+            s,
+            "POST /api/focus HTTP/1.1\r\nHost: {host}\r\nOrigin: http://{host}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let _ = s.read(&mut [0u8; 64]);
     }
 }
 
@@ -369,8 +570,7 @@ fn main() -> anyhow::Result<()> {
     let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(_) if !serve_only => {
-            // Already running: just bring up another window onto it.
-            open_window(&url, &dir);
+            focus_running_instance(port);
             return Ok(());
         }
         Err(e) => return Err(e.into()),
@@ -382,19 +582,27 @@ fn main() -> anyhow::Result<()> {
     app.start();
 
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-    runtime.block_on(async move {
+    let serve = async move {
         let listener = tokio::net::TcpListener::from_std(listener)?;
-        let server = axum::serve(listener, router(app.clone()));
-        if serve_only {
-            println!("Unibox is running at {url}");
-            server.await?;
-        } else {
-            open_window(&url, &dir);
-            tokio::select! {
-                r = server => r?,
-                _ = until_windows_close(app) => {}
+        axum::serve(listener, router(app)).await?;
+        Ok::<_, anyhow::Error>(())
+    };
+
+    #[cfg(windows)]
+    if !serve_only {
+        // The server runs behind the window; closing the window ends the program.
+        std::thread::spawn(move || runtime.block_on(serve));
+        if let Err(e) = window::run(&url, &dir) {
+            // No WebView2 runtime, most likely: fall back to the default browser.
+            eprintln!("window: {e:#}");
+            let _ = open_external(&url);
+            loop {
+                std::thread::park();
             }
         }
-        Ok::<_, anyhow::Error>(())
-    })
+        return Ok(());
+    }
+
+    println!("Unibox is running at {url}");
+    runtime.block_on(serve)
 }
