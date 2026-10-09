@@ -27,6 +27,8 @@ const state = {
   views: new Map(),      // thread key -> rendered conversation, oldest first
   open: null,            // the view on screen
   collection: null,      // { title }: the list is showing a set the assistant picked
+  unreadOnly: false,     // list only conversations with something unread
+  kept: new Set(),       // thread keys opened while unreadOnly is on; they stay listed once read
 };
 const key = t => t.account_id + ":" + t.thrid;
 
@@ -256,7 +258,21 @@ function listParams(offset) {
   if (state.collection) return new URLSearchParams({ collection: true, offset });
   const p = new URLSearchParams({ q: state.q, offset });
   if (state.filter != null) p.set("account", state.filter);
+  if (state.unreadOnly) { p.set("unread", true); p.set("keep", [...state.kept].join(",")); }
   return p;
+}
+
+/** Show only conversations with something unread. Ones opened while it is on stay listed. */
+function setUnreadOnly(on) {
+  leaveCollection();
+  state.unreadOnly = on;
+  state.kept = new Set();
+  state.cursor = 0;
+  state.selected.clear();
+  $("#unread-only").classList.toggle("on", on);
+  $("#unread-only").setAttribute("aria-pressed", on);
+  hideView();
+  loadThreads(true);
 }
 
 /** Stop showing the assistant's set and go back to the ordinary list. */
@@ -292,6 +308,7 @@ function renderList() {
   if (!state.threads.length) {
     list.append(el("div", "empty",
       !state.accounts.length ? "Add a Gmail account to get started."
+        : state.unreadOnly ? (state.q ? "Nothing unread matches that search." : "Nothing unread.")
         : state.q ? "Nothing in the inbox matches that search."
         : state.accounts.some(a => !a.last_sync) ? "Fetching your inbox…" : "Inbox zero."));
     return;
@@ -420,6 +437,7 @@ async function loadView(v, peek) {
 let readTimer;
 function show(t) {
   clearTimeout(showTimer);
+  if (state.unreadOnly) state.kept.add(key(t));
   const v = ensureView(t);
   if (state.open !== v) {
     state.open?.node.classList.remove("on");
@@ -860,6 +878,10 @@ let gPending = 0, starPending = 0;
 function goInbox() {
   $("#search").value = "";
   state.q = "";
+  state.unreadOnly = false;
+  state.kept = new Set();
+  $("#unread-only").classList.remove("on");
+  $("#unread-only").setAttribute("aria-pressed", false);
   setFilter(null);   // also leaves any set the assistant was showing
 }
 
@@ -940,6 +962,7 @@ function onKey(e) {
       break;
     }
     case "r": replyInGmail(); break;
+    case "f": setUnreadOnly(!state.unreadOnly); break;
     case "/": $("#search").focus(); $("#search").select(); break;
     case "?": $("#help-dialog").showModal(); break;
     case "g": gPending = Date.now(); break;
@@ -981,6 +1004,7 @@ function renderSync() {
 function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
 $("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
+$("#unread-only").onclick = e => { e.currentTarget.blur(); setUnreadOnly(!state.unreadOnly); };
 $("#help").onclick = () => $("#help-dialog").showModal();
 // The same dialog adds an account or, given one, replaces its saved app password.
 function openAccountDialog(acct) {
@@ -1173,6 +1197,9 @@ $("#as-setup").addEventListener("submit", async e => {
 /** The assistant picked a set of conversations: put it in the list. */
 function showCollection(title) {
   state.collection = { title };
+  state.unreadOnly = false;
+  $("#unread-only").classList.remove("on");
+  $("#unread-only").setAttribute("aria-pressed", false);
   state.q = "";
   $("#search").value = "";
   state.filter = null;

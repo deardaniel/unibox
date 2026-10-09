@@ -120,6 +120,9 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 /* ---- assistant ---- */
 #ask { display: grid; place-items: center; width: 34px; padding: 0; color: var(--accent); }
 #ask.on { background: var(--hover); }
+#unread-only { padding: 0 12px; }
+#unread-only.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+body.solo #unread-only { display: none; }
 #assistant { flex: none; width: 380px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
 #assistant[hidden] { display: none; }
 #assistant > header { display: flex; align-items: center; gap: 2px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--line); height: 51px; }

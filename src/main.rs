@@ -151,6 +151,11 @@ struct ThreadQuery {
     q: String,
     #[serde(default)]
     offset: i64,
+    #[serde(default)]
+    unread: bool,
+    /// Comma-separated "account:thread" keys to keep listed while `unread` is on.
+    #[serde(default)]
+    keep: String,
 }
 
 async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>) -> Api<Json<Vec<db::ThreadRow>>> {
@@ -161,7 +166,8 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
                 let rows = app.db.threads_by_keys(&keys)?;
                 return Ok(rows.into_iter().skip(q.offset.max(0) as usize).take(60).collect());
             }
-            app.db.threads(q.account, q.q.trim(), 60, q.offset.max(0))
+            let keep: Vec<&str> = q.keep.split(',').filter(|k| !k.is_empty()).collect();
+            app.db.threads(q.account, q.q.trim(), q.unread, &serde_json::to_string(&keep)?, 60, q.offset.max(0))
         })
         .await?,
     ))

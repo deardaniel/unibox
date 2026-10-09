@@ -275,7 +275,18 @@ impl Db {
             .optional()?)
     }
 
-    pub fn threads(&self, account: Option<i64>, query: &str, limit: i64, offset: i64) -> Result<Vec<ThreadRow>> {
+    /// `unread_only` narrows the list to conversations with something unread; `keep` is a JSON
+    /// array of "account:thread" keys that stay listed regardless (the ones just opened, so
+    /// reading a conversation doesn't pull it out from under the cursor).
+    pub fn threads(
+        &self,
+        account: Option<i64>,
+        query: &str,
+        unread_only: bool,
+        keep: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ThreadRow>> {
         let c = self.conn()?;
         let like = format!("%{}%", query.replace('%', "").replace('_', " "));
         // SQLite fills the bare columns from the row that supplied MAX(date): the newest message.
@@ -294,10 +305,12 @@ impl Db {
                        WHERE s.account_id=m.account_id AND s.gm_thrid=m.gm_thrid
                          AND (s.subject LIKE ?2 OR s.from_name LIKE ?2 OR s.from_addr LIKE ?2 OR s.body_text LIKE ?2)))
               GROUP BY account_id, gm_thrid
+             HAVING ?5=0 OR SUM(seen=0)>0
+                    OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?6))
               ORDER BY newest DESC
               LIMIT ?3 OFFSET ?4",
         )?;
-        let rows = st.query_map(params![account, like, limit, offset], |r| {
+        let rows = st.query_map(params![account, like, limit, offset, unread_only, keep], |r| {
             Ok(ThreadRow {
                 account_id: r.get(0)?,
                 thrid: r.get(1)?,
