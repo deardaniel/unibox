@@ -14,6 +14,8 @@ use std::sync::OnceLock;
 pub struct Facts {
     /// Sent by a system (newsletter, notification, receipt) rather than written by a person.
     pub automated: bool,
+    /// What decided that, as the end of the sentence "...because it ___".
+    pub why: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsubscribe: Option<Unsubscribe>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,7 +131,8 @@ pub fn facts(msg: &Message, raw: &[u8]) -> Facts {
         // the invitation itself says it better
         cards.retain(|c| !c.rows.iter().any(|r| r.label == "When" && c.actions.is_empty()));
     }
-    Facts { automated: automated(msg, group.as_ref()), unsubscribe: unsubscribe(msg), group, event, cards, remote_images: remote_images(&html) }
+    let (automated, why) = automated(msg, group.as_ref());
+    Facts { automated, why, unsubscribe: unsubscribe(msg), group, event, cards, remote_images: remote_images(&html) }
 }
 
 // ---- unsubscribe ---------------------------------------------------------------
@@ -223,7 +226,7 @@ fn group(msg: &Message, raw: &[u8]) -> Option<Group> {
 }
 
 // ---- a person, or a system? ----------------------------------------------------
-fn automated(msg: &Message, group: Option<&Group>) -> bool {
+fn automated(msg: &Message, group: Option<&Group>) -> (bool, &'static str) {
     static ROBOT: OnceLock<Regex> = OnceLock::new();
     let has = |name: &str| msg.header_raw(name).is_some();
     let from = msg.from().and_then(|a| a.first()).and_then(|a| a.address()).unwrap_or_default().to_lowercase();
@@ -241,28 +244,39 @@ fn automated(msg: &Message, group: Option<&Group>) -> bool {
     let post_domain = post.split("mailto:").nth(1).and_then(|m| m.split(['>', '?']).next()).and_then(|a| a.rsplit('@').next()).unwrap_or_default().to_string();
     let from_domain = from.rsplit('@').next().unwrap_or_default();
     let discussion = group.is_some() || (!post_domain.is_empty() && trust::org(&post_domain) != trust::org(from_domain));
-    if (!auto_submitted.is_empty() && auto_submitted != "no")
-        || matches!(precedence.as_str(), "bulk" | "junk")
-        || has("Feedback-ID")
-        || robot.is_match(local)
-        || ((has("List-Unsubscribe") || has("List-ID")) && !discussion)
-    {
-        return true;
+    let marks = [
+        (!auto_submitted.is_empty() && auto_submitted != "no", "says it was generated automatically"),
+        (matches!(precedence.as_str(), "bulk" | "junk"), "is marked as bulk mail"),
+        ((has("List-Unsubscribe") || has("List-ID")) && !discussion, "is from a mailing list that only sends"),
+        (has("Feedback-ID"), "carries a bulk sender's tracking id"),
+        (robot.is_match(local), "comes from an address that isn't a person's"),
+    ];
+    if let Some((_, why)) = marks.iter().find(|(hit, _)| *hit) {
+        return (true, why);
     }
     // Plenty of receipts and notices carry none of those marks. What they also lack is any
     // sign of a mail program a person types into, or of being part of a conversation.
     static CLIENT: OnceLock<Regex> = OnceLock::new();
     let id = msg.message_id().unwrap_or_default().to_ascii_lowercase();
     let mailer = format!("{} {}", header(msg, "X-Mailer"), header(msg, "User-Agent")).to_ascii_lowercase();
-    let written = discussion
-        || ["mail.gmail.com", "outlook.com", "icloud.com", "yahoo.com", "yahoo.co.jp"].iter().any(|d| id.ends_with(d))
-        || re(&CLIENT, "iphone|ipad|apple mail|outlook|thunderbird|mutt|becky|ymail|yahoomail|airmail|spark|mailmate|evolution|k-9|android|shuriken|al-mail|icloud").is_match(&mailer)
-        || has("Thread-Index")
-        || has("X-MS-Has-Attach")
-        || has("In-Reply-To")
+    let signs = [
+        (group.is_some(), "was written to a Google Group"),
+        (discussion, "was posted to a discussion list"),
         // mail this account sent was never checked on the way in
-        || !has("Authentication-Results");
-    !written
+        (!has("Authentication-Results"), "was sent from this account"),
+        (
+            ["mail.gmail.com", "outlook.com", "icloud.com", "yahoo.com", "yahoo.co.jp"].iter().any(|d| id.ends_with(d))
+                || re(&CLIENT, "iphone|ipad|apple mail|outlook|thunderbird|mutt|becky|ymail|yahoomail|airmail|spark|mailmate|evolution|k-9|android|shuriken|al-mail|icloud").is_match(&mailer)
+                || has("Thread-Index")
+                || has("X-MS-Has-Attach"),
+            "was written in a mail program",
+        ),
+        (has("In-Reply-To"), "is a reply in a conversation"),
+    ];
+    match signs.iter().find(|(hit, _)| *hit) {
+        Some((_, why)) => (false, why),
+        None => (true, "shows no sign of a mail program or of being a reply"),
+    }
 }
 
 // ---- pictures ------------------------------------------------------------------
@@ -741,7 +755,9 @@ List-Unsubscribe-Post: List-Unsubscribe=One-Click\nSubject: s\n\nhi\n");
         assert!(!of(&format!("{checked}From: Desk <desk@example.com>\nIn-Reply-To: <a@b>\nSubject: Re: lunch\n\nhi\n")).automated);
         assert!(!of("From: Me <me@example.com>\nSubject: sent from here\n\nhi\n").automated);
         // a receipt with no list headers at all: nothing about it says a person typed it
-        assert!(of(&format!("{checked}From: Bank <info@bank.example>\nMessage-ID: <1.2@bank.example>\nSubject: Statement\n\nhi\n")).automated);
+        let bank = of(&format!("{checked}From: Bank <info@bank.example>\nMessage-ID: <1.2@bank.example>\nSubject: Statement\n\nhi\n"));
+        assert!(bank.automated && bank.why.starts_with("shows no sign"));
+        assert_eq!(of(&format!("{checked}{gmail}From: Aoife <aoife@example.com>\nSubject: lunch\n\nhi\n")).why, "was written in a mail program");
         assert!(of(&format!("{checked}{gmail}From: Shop <no-reply@shop.example>\nSubject: s\n\nhi\n")).automated);
         assert!(of(&format!("{checked}{gmail}From: Shop <hello@shop.example>\nPrecedence: bulk\nSubject: s\n\nhi\n")).automated);
         assert!(of(&format!("{checked}{gmail}From: Aoife <aoife@example.com>\nAuto-Submitted: auto-replied\nSubject: away\n\nhi\n")).automated);

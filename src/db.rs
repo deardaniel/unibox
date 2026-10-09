@@ -37,6 +37,8 @@ pub struct ThreadRow {
     pub from_addr: String,
     /// False for a conversation shown from outside the inbox (in a set the assistant picked).
     pub in_inbox: bool,
+    /// A person wrote at least one of its messages (as far as the app can tell).
+    pub people: bool,
 }
 
 #[derive(Serialize)]
@@ -302,7 +304,8 @@ impl Db {
                           FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid
                          GROUP BY n ORDER BY MIN(t.date))),
                     (SELECT COUNT(*) FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid),
-                    SUM(seen=0), SUM(starred)>0, SUM(has_attach)>0, from_name, from_addr
+                    SUM(seen=0), SUM(starred)>0, SUM(has_attach)>0, from_name, from_addr,
+                    SUM(automated=0)>0
                FROM messages m
               WHERE in_inbox=1
                 AND (?1 IS NULL OR account_id=?1)
@@ -331,6 +334,7 @@ impl Db {
                 from_name: r.get(10)?,
                 from_addr: r.get(11)?,
                 in_inbox: true,
+                people: r.get::<_, Option<bool>>(12)?.unwrap_or(false),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -632,7 +636,7 @@ impl Db {
                           FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid
                          GROUP BY n ORDER BY MIN(t.date))),
                     COUNT(*), COALESCE(SUM(seen=0 AND in_inbox=1), 0), SUM(starred)>0, SUM(has_attach)>0,
-                    from_name, from_addr, SUM(in_inbox)>0
+                    from_name, from_addr, SUM(in_inbox)>0, SUM(automated=0)>0
                FROM messages m WHERE account_id=? AND gm_thrid=?
               GROUP BY account_id, gm_thrid",
         )?;
@@ -654,6 +658,7 @@ impl Db {
                         from_name: r.get(10)?,
                         from_addr: r.get(11)?,
                         in_inbox: r.get(12)?,
+                        people: r.get::<_, Option<bool>>(13)?.unwrap_or(false),
                     })
                 })
                 .optional()?;

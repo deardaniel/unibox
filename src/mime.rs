@@ -114,7 +114,7 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 }
 
 /// Bump when `summarize` changes, so stored messages are summarised again at startup.
-pub const SUMMARY_VERSION: &str = "6";
+pub const SUMMARY_VERSION: &str = "7";
 
 /// What we keep alongside the raw message for the list view and for search.
 pub struct Summary {
@@ -130,7 +130,7 @@ pub struct Summary {
 
 pub fn summarize(raw: &[u8]) -> Summary {
     let Some(msg) = MessageParser::default().parse(raw) else {
-        return Summary { snippet: String::new(), text: String::new(), attachments: "[]".into(), facts: "{}".into(), automated: false };
+        return Summary { snippet: String::new(), text: String::new(), attachments: "[]".into(), facts: "{}".into(), automated: true };
     };
     let mut text = msg.body_text(0).map(|t| t.into_owned()).unwrap_or_default();
     // Plenty of HTML mail ships a throwaway plain-text part ("view this in a browser"),

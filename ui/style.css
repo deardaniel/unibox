@@ -205,6 +205,8 @@ body.solo .view h1, body.solo .view .messages { max-width: none; }
 .row-t .who, .row-t .subj, .row-t .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-t .subj, .row-t .snip { display: block; }
 .row-t .who .c { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
+.row-t .who .person { color: var(--accent); opacity: .8; margin-right: 5px; }
+.row-t .who .person svg { width: 11px; height: 11px; vertical-align: -1px; }
 .row-t .snip { color: var(--muted); font-weight: 400; font-size: 13px; }
 .row-t .marks { grid-area: marks; align-self: start; color: var(--muted); white-space: nowrap; text-align: right; }
 .row-t .marks .star { color: #e2a400; }

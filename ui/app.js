@@ -41,6 +41,7 @@ const ICONS = {
   verified: '<path d="M8 1.5 13.5 3.6v4.1c0 3.3-2.2 5.7-5.5 6.8-3.3-1.1-5.5-3.5-5.5-6.8V3.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.6 8.1 7.4 9.9 10.6 6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
   unverified: '<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.2 6.4a1.9 1.9 0 1 1 2.6 1.8c-.5.3-.8.6-.8 1.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9"/>',
   failed: '<path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.4v3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9"/>',
+  person: '<circle cx="8" cy="5.2" r="2.7"/><path d="M2.8 14c.4-3 2.5-4.7 5.2-4.7s4.800 1.700 5.200 4.700z"/>',
   save: '<path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function icon(name) {
@@ -335,6 +336,12 @@ function renderList() {
     av.append(dot);
     av.title = account(t.account_id)?.email || "";
     const who = el("span", "who", t.senders || "(unknown)");
+    if (t.people) {
+      const p = el("span", "person");
+      p.append(icon("person"));
+      p.title = "A person wrote this";
+      who.prepend(p);
+    }
     if (t.count > 1) who.append(el("span", "c", t.count));
     const text = el("span", "text");
     text.append(el("span", "subj", t.subject), el("span", "snip", t.snippet));
@@ -756,6 +763,7 @@ function senderDetails(m) {
   const table = el("table");
   const row = (k, v, cls) => { const r = el("tr"); r.append(el("td", "", k), el("td", cls || "", v)); table.append(r); };
   row("From", m.from_name ? `${m.from_name} <${m.from_addr}>` : m.from_addr);
+  if (m.facts?.why) row("Written by", `${m.facts.automated ? "A system, probably" : "A person, probably"}: it ${m.facts.why}.`);
   if (group) row("Sent through", `the Google Group ${group.address}` + (group.rewritten ? ". The checks below are the ones the group made on the sender." : ""));
   if (t.reply_to) row("Replies go to", t.reply_to, "warn");
   if (t.name_address) row("Name claims", t.name_address, "warn");
