@@ -548,7 +548,6 @@ async function messageMenu(anchor, node, m) {
   item("html", "Formatted", !!parts);
   item("text", "Plain text", !!parts?.text);
   item("source", "Original message", !!parts);
-  if (m.has_body && current === "html" && node.dataset.pictures !== "1" && !m.pictures) {
   {
     const from = m.facts?.group?.address ? "the group " + m.facts.group.address : m.from_name || m.from_addr;
     const b = el("button", "sep", `Archive everything from ${from}…`);
@@ -556,6 +555,7 @@ async function messageMenu(anchor, node, m) {
     b.onclick = () => { menu.remove(); archiveAllFrom(m, from); };
     menu.append(b);
   }
+  if (m.has_body && current === "html" && !picturesOn(node, m)) {
     const b = el("button", "sep", "Show pictures");
     b.onclick = () => { menu.remove(); showPictures(node, m); };
     menu.append(b);
@@ -627,7 +627,9 @@ function unsubscribeButton(m) {
 
 // ---- pictures ------------------------------------------------------------------
 // Fetching a picture from the sender's server tells them the message was opened, and when and
-// roughly where. So nothing is fetched until asked: once for a message, or always for a sender.
+// roughly where. Senders Gmail verified get that; from anyone else nothing is fetched until
+// asked, once for a message or always for a sender.
+const picturesOn = (node, m) => m.pictures || node.dataset.pictures === "1" || !["unverified", "failed"].includes(senderTrust(m)?.level);
 function showPictures(node, m) {
   node.dataset.pictures = "1";
   node.querySelector(".content").textContent = "";
@@ -851,7 +853,7 @@ function fill(node, m) {
   const poll = setInterval(() => (f.isConnected ? setup() : clearInterval(poll)), 40);
   f.addEventListener("load", setup);
   const view = node.dataset.view || "html";
-  const pictures = m.pictures || node.dataset.pictures === "1";
+  const pictures = picturesOn(node, m);
   f.src = `/api/message/${m.id}/html?v=${BUILD}` + (view === "html" ? (pictures ? "&pictures=true" : "") : "&view=" + view);
   if (view === "html") {
     if (m.facts?.remote_images && !pictures) {
@@ -860,7 +862,7 @@ function fill(node, m) {
       once.onclick = () => showPictures(node, m);
       always.onclick = () => alwaysPictures(m, true);
       always.title = `Always show pictures in mail from ${m.from_addr}`;
-      bar.append(el("span", "", "Pictures hidden, so the sender can't tell you opened this."), once, always);
+      bar.append(el("span", "", "Pictures hidden: Gmail couldn't verify this sender."), once, always);
       content.append(bar);
     }
     // what the message says about itself in a form a program can read, unless it may be forged
