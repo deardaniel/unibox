@@ -149,6 +149,33 @@ function avatar(name, addr, cls = "") {
 }
 
 // ---- sidebar ---------------------------------------------------------------
+/** Show how many inbox conversations are unread on the app's taskbar button (a red badge
+ *  over the icon) and in the window title. The badge is drawn here, where there is a font,
+ *  and handed to the window as raw pixels; over 99 it is a plain dot. */
+let badged = null;
+function taskbarBadge(n) {
+  if (SOLO || n === badged) return;
+  badged = n;
+  document.title = n ? `Unibox (${n.toLocaleString()})` : "Unibox";
+  if (!window.ipc) return;
+  if (!n) return window.ipc.postMessage("badge:");
+  const s = Math.max(16, Math.min(64, Math.round(16 * devicePixelRatio)));
+  const c = Object.assign(document.createElement("canvas"), { width: s, height: s }), g = c.getContext("2d");
+  g.fillStyle = "#d92d20";
+  g.beginPath(); g.arc(s / 2, s / 2, s / 2, 0, 2 * Math.PI); g.fill();
+  g.fillStyle = "#fff";
+  if (n > 99) { g.beginPath(); g.arc(s / 2, s / 2, s * 0.19, 0, 2 * Math.PI); g.fill(); }
+  else {
+    const text = String(n);
+    g.font = `700 ${s * (text.length > 1 ? 0.62 : 0.78)}px "Segoe UI", sans-serif`;
+    g.textAlign = "center";
+    const m = g.measureText(text);
+    g.fillText(text, s / 2, s / 2 + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2);
+  }
+  const hex = Array.from(g.getImageData(0, 0, s, s).data, b => b.toString(16).padStart(2, "0")).join("");
+  window.ipc.postMessage(`badge:${s}:${hex}`);
+}
+
 function renderAccounts() {
   const nav = $("#accounts");
   if (nav.querySelector(".dragging")) return;   // don't rebuild the rows under a drag
@@ -173,7 +200,9 @@ function renderAccounts() {
     if (acct) { b.dataset.id = id; b.onpointerdown = e => dragAccount(e, b); }
     nav.append(b);
   };
-  item(null, "All inboxes", "#77736b", state.accounts.reduce((n, a) => n + a.unread, 0));
+  const unread = state.accounts.reduce((n, a) => n + a.unread, 0);
+  item(null, "All inboxes", "#77736b", unread);
+  taskbarBadge(unread);
   for (const a of state.accounts) item(a.id, a.email, a.color, a.unread, a);
 
   const errs = state.accounts.filter(a => a.last_error);

@@ -621,6 +621,7 @@ mod window {
     use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
     use tao::event::{Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
+    use tao::platform::windows::WindowExtWindows;
     use tao::window::{Icon, Theme, Window, WindowBuilder, WindowId};
     use wry::{NewWindowResponse, WebContext, WebView, WebViewBuilder};
 
@@ -631,6 +632,8 @@ mod window {
         Open(String),
         Title(WindowId, String),
         Close(WindowId),
+        /// The unread badge for the taskbar button, as (side, RGBA pixels); `None` clears it.
+        Badge(WindowId, Option<(u32, Vec<u8>)>),
     }
     static PROXY: OnceLock<Mutex<EventLoopProxy<UserEvent>>> = OnceLock::new();
 
@@ -677,6 +680,22 @@ mod window {
         Icon::from_rgba(rgba, N as u32, N as u32).ok()
     }
 
+    /// What the page sent after "badge:": nothing to clear it, or "<side>:<hex RGBA pixels>".
+    /// `Err` if it is neither.
+    fn parse_badge(spec: &str) -> Result<Option<(u32, Vec<u8>)>, ()> {
+        if spec.is_empty() {
+            return Ok(None);
+        }
+        let (side, hex) = spec.split_once(':').ok_or(())?;
+        let side: u32 = side.parse().map_err(drop)?;
+        if !(8..=64).contains(&side) || hex.len() != (side * side * 8) as usize || !hex.is_ascii() {
+            return Err(());
+        }
+        let pixels: Result<Vec<u8>, _> =
+            (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16)).collect();
+        Ok(Some((side, pixels.map_err(drop)?)))
+    }
+
     /// One app window showing `url`. The web view is listed first so it is dropped first.
     fn make_window(
         target: &EventLoopWindowTarget<UserEvent>,
@@ -697,6 +716,7 @@ mod window {
         // Match the page colour so a resize never flashes white around the edges.
         let background = if window.theme() == Theme::Dark { (0x13, 0x13, 0x13, 255) } else { (0xf6, 0xf5, 0xf2, 255) };
         let origin = origin.to_string();
+        let app = origin.clone();
         let webview = WebViewBuilder::new_with_web_context(context)
             .with_url(url)
             .with_background_color(background)
@@ -712,10 +732,16 @@ mod window {
                 target.starts_with(&origin) || target.starts_with("about:") || target.starts_with("data:")
             })
             .with_document_title_changed_handler(move |title| send(UserEvent::Title(id, title)))
-            // The page asks to be closed with window.ipc.postMessage("close").
+            // The page asks to be closed with window.ipc.postMessage("close"), and sets the
+            // taskbar badge with "badge:…". Only the app's own pages are listened to.
             .with_ipc_handler(move |request| {
+                if !request.uri().to_string().starts_with(&app) {
+                    return;
+                }
                 if request.body() == "close" {
                     send(UserEvent::Close(id));
+                } else if let Some(Ok(badge)) = request.body().strip_prefix("badge:").map(parse_badge) {
+                    send(UserEvent::Badge(id, badge));
                 }
             })
             .build(&window)?;
@@ -826,6 +852,12 @@ mod window {
                 Event::UserEvent(UserEvent::Title(id, title)) => {
                     if let Some((_, w)) = windows.get(&id) {
                         w.set_title(&title);
+                    }
+                }
+                Event::UserEvent(UserEvent::Badge(id, badge)) if id == main_id => {
+                    if let Some((_, w)) = windows.get(&id) {
+                        let icon = badge.and_then(|(side, pixels)| Icon::from_rgba(pixels, side, side).ok());
+                        w.set_overlay_icon(icon.as_ref());
                     }
                 }
                 Event::UserEvent(UserEvent::Close(id)) if id != main_id => drop(windows.remove(&id)),
