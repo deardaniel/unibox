@@ -37,6 +37,8 @@ pub struct App {
     /// through the list cannot open a pile of connections to Gmail.
     hydrating: Mutex<()>,
     wake: Mutex<Option<mpsc::Sender<()>>>,
+    /// (a pass is running, Unix time of the next scheduled pass)
+    status: Mutex<(bool, i64)>,
 }
 
 impl App {
@@ -50,6 +52,7 @@ impl App {
             hydrated: Mutex::new(HashMap::new()),
             hydrating: Mutex::new(()),
             wake: Mutex::new(None),
+            status: Mutex::new((true, 0)),
         })
     }
 
@@ -72,6 +75,17 @@ impl App {
         Ok(())
     }
 
+    /// What the sync button shows: whether a pass is running and when the next one is due.
+    pub fn sync_status(&self) -> serde_json::Value {
+        let (syncing, next) = *self.status.lock().unwrap();
+        serde_json::json!({ "syncing": syncing, "next": next })
+    }
+
+    fn set_status(&self, syncing: bool, next: i64) {
+        *self.status.lock().unwrap() = (syncing, next);
+        self.emit("sync", &self.sync_status().to_string());
+    }
+
     /// Ask the background thread to sync now instead of waiting for its timer.
     pub fn sync_soon(&self) {
         if let Some(tx) = self.wake.lock().unwrap().as_ref() {
@@ -86,6 +100,7 @@ impl App {
         std::thread::spawn(move || {
             app.refresh_summaries();
             loop {
+                app.set_status(true, 0);
                 let mut more = false;
                 for acct in app.db.accounts().unwrap_or_default() {
                     let result = app.sync_account(acct.id, &acct.email);
@@ -98,7 +113,12 @@ impl App {
                     app.emit("synced", &acct.email);
                 }
                 // While there is still mail to preload, go straight round again.
-                let _ = rx.recv_timeout(if more { Duration::from_millis(200) } else { SYNC_EVERY });
+                let wait = if more { Duration::from_millis(200) } else { SYNC_EVERY };
+                if !more {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                    app.set_status(false, (now + wait.as_secs()) as i64);
+                }
+                let _ = rx.recv_timeout(wait);
                 while rx.try_recv().is_ok() {} // collapse a burst of requests into one pass
             }
         });

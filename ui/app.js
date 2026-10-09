@@ -634,7 +634,20 @@ $("#search").addEventListener("input", e => {
 $("#search").addEventListener("keydown", e => { if (e.key === "Enter") { e.target.blur(); $("#list").focus(); } });
 
 // ---- toolbar and dialogs -------------------------------------------------------
-$("#sync").onclick = () => { api("/api/sync", { method: "POST" }); $("#status").textContent = "Syncing…"; };
+// The sync button says what the background sync is doing: working, or counting down to the next check.
+const sync = { syncing: true, next: 0 };
+function renderSync() {
+  const left = Math.max(0, sync.next - Math.floor(Date.now() / 1000));
+  // a countdown that has run out means the next pass is about to start
+  const busy = sync.syncing || left === 0;
+  const b = $("#sync");
+  b.classList.toggle("busy", busy);
+  b.querySelector(".what").textContent = busy ? "Syncing…" : `Sync in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  b.title = busy ? "Checking Gmail for new mail and changes" : "Waiting for the next automatic check. Click to check now.";
+}
+function setSync(s) { Object.assign(sync, s); renderSync(); }
+setInterval(renderSync, 1000);
+$("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
 $("#help").onclick = () => $("#help-dialog").showModal();
 $("#add").onclick = () => { $("#add").blur(); $("#add-error").textContent = ""; $("#add-dialog").showModal(); };
 $("#add-cancel").onclick = () => $("#add-dialog").close();
@@ -699,6 +712,7 @@ function listen() {
   es.onmessage = e => {
     const ev = JSON.parse(e.data);
     if (ev.kind === "error") return toast(ev.detail);
+    if (ev.kind === "sync") return setSync(JSON.parse(ev.detail));
     if (SOLO) { if (state.open) loadView(state.open, true).catch(() => {}); return; }
     if (ev.kind === "thread") {
       for (const v of state.views.values()) if (v.thrid === ev.detail) loadView(v, true).catch(() => {});
@@ -723,6 +737,7 @@ function listen() {
   setLayout(state.split);
   await refresh();
   listen();
+  api("/api/sync").then(setSync).catch(() => {});
   $("#list").focus();
   if (!state.accounts.length) $("#add-dialog").showModal();
   // Have the top of the inbox rendered before it is asked for.

@@ -64,6 +64,13 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #top { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 #search { flex: 1; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
           border-radius: 6px; padding: 6px 10px; min-width: 0; }
+/* fixed width, so the countdown ticking does not nudge the search box */
+#sync { display: flex; align-items: center; gap: 6px; width: 132px; justify-content: center; white-space: nowrap;
+        font-variant-numeric: tabular-nums; }
+#sync .spin { display: inline-block; line-height: 1; }
+#sync.busy .spin { animation: spin 1s linear infinite; }
+#sync.busy { color: var(--accent); }
+@keyframes spin { to { transform: rotate(360deg); } }
 #work { flex: 1; min-height: 0; position: relative; display: flex; }
 #list { overflow-y: auto; outline: none; flex: 1; min-width: 0; }
 #pane { display: flex; flex-direction: column; min-width: 0; }

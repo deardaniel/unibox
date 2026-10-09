@@ -236,6 +236,10 @@ async fn thread_action(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn sync_status(State(app): State<Arc<App>>) -> Json<serde_json::Value> {
+    Json(app.sync_status())
+}
+
 async fn sync_now(State(app): State<Arc<App>>) -> StatusCode {
     app.sync_soon();
     StatusCode::ACCEPTED
@@ -367,7 +371,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/html", get(message_html))
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
-        .route("/api/sync", post(sync_now))
+        .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/open", post(open_url))
         .route("/api/focus", post(focus_window))
