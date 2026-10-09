@@ -96,9 +96,8 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #sync:hover { background: linear-gradient(var(--hover), var(--hover)) padding-box,
                           conic-gradient(var(--accent) calc(var(--p) * 360deg), var(--line) 0) border-box; }
 #sync.busy { transition: none; }
-#sync.live { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent);
-             background: var(--panel); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
-                                                    0 0 9px color-mix(in srgb, var(--accent) 40%, transparent); }
+#sync.live { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); color: var(--accent);
+             background: var(--panel); box-shadow: 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
 #sync.live:hover { background: var(--hover); }
 /* every control in the two toolbars is the same height */
 #top > *, #thread-bar button { height: 34px; }
