@@ -8,6 +8,7 @@ plain TCP on 127.0.0.1:1143. Any address logs in with any password except "wrong
     UNIBOX_IMAP=plain:127.0.0.1:1143 target/debug/unibox --serve --data /tmp/unibox-test
 """
 import re
+import select
 import socketserver
 import struct
 import sys
@@ -121,6 +122,12 @@ def mailbox(owner):
 
 
 BOXES = {}
+VERSION = {}  # user -> counter bumped whenever that mailbox changes; IDLE connections watch it
+
+
+def touch(user):
+    VERSION[user] = VERSION.get(user, 0) + 1
+
 DRAFTS = {}   # user -> messages saved with APPEND
 
 
@@ -156,6 +163,20 @@ class Handler(socketserver.StreamRequestHandler):
             tag, _, rest = line.partition(" ")
             cmd, _, args = rest.partition(" ")
             cmd = cmd.upper()
+            if cmd == "IDLE":
+                # hold the connection; say so when this user's mailbox changes; end on DONE
+                self.send("+ idling\r\n")
+                self.wfile.flush()
+                seen = VERSION.get(user, 0)
+                while not select.select([self.connection], [], [], 0.1)[0]:
+                    if VERSION.get(user, 0) != seen:
+                        seen = VERSION.get(user, 0)
+                        self.send(f"* {len(self.visible(user, selected))} EXISTS\r\n")
+                        self.wfile.flush()
+                if not self.rfile.readline():
+                    return
+                self.send(f"{tag} OK IDLE terminated (Success)\r\n")
+                continue
             if cmd == "UID":
                 sub, _, args = args.partition(" ")
                 cmd = "UID " + sub.upper()
@@ -208,6 +229,7 @@ class Handler(socketserver.StreamRequestHandler):
                     for uid in parse_set(setstr, list(msgs)):
                         for f in re.findall(r"\\\w+", flags):
                             (msgs[uid].flags.add if op.startswith("+") else msgs[uid].flags.discard)(f)
+                    touch(user)
                     self.send(f"{tag} OK Success\r\n")
                 elif cmd == "APPEND":
                     # APPEND "mailbox" (flags) {n}  then the message itself
@@ -226,6 +248,7 @@ class Handler(socketserver.StreamRequestHandler):
                         for uid in parse_set(setstr, list(msgs)):
                             msgs[uid].inbox = True
                             msgs[uid].uid_inbox += 5000   # back in the inbox under a new UID
+                        touch(user)
                         self.send(f"{tag} OK (Success)\r\n")
                     else:
                         self.send(f"{tag} NO [TRYCREATE] (Failure)\r\n")
@@ -235,9 +258,19 @@ class Handler(socketserver.StreamRequestHandler):
                     if selected == "inbox" and "All Mail" in dest:
                         for uid in parse_set(setstr, list(msgs)):
                             msgs[uid].inbox = False
+                        touch(user)
                         self.send(f"{tag} OK [COPYUID 7 {setstr} {setstr}] (Success)\r\n")
                     else:
                         self.send(f"{tag} NO [TRYCREATE] No folder {dest} (Failure)\r\n")
+                elif cmd == "XDELIVER":
+                    # test hook: new mail arrives in this user's inbox.  XDELIVER <subject>
+                    msgs = box(user)
+                    n = max(m.uid_all for m in msgs) + 1
+                    raw = build(frm="Postie <postie@example.com>", to=user, subject=args or "Just arrived",
+                                when=int(time.time()), text="This one was delivered while you were watching.")
+                    msgs.append(Msg(n, 9000 + n, raw, int(time.time())))
+                    touch(user)
+                    self.send(f"{tag} OK delivered\r\n")
                 elif cmd == "XDRAFTS":
                     # test hook: hand back the newest saved draft
                     saved = DRAFTS.get(user, [])

@@ -19,6 +19,12 @@ const FULL_ITEMS: &str = "(UID X-GM-MSGID X-GM-THRID FLAGS INTERNALDATE RFC822.S
 /// which load when opened.
 const MAX_PREFETCH_SIZE: i64 = 25 * 1024 * 1024;
 const SYNC_EVERY: Duration = Duration::from_secs(120);
+/// ...unless every account has a live IDLE connection telling us about inbox changes as
+/// they happen. Then the timed pass is only a safety net.
+const SYNC_EVERY_WATCHED: Duration = Duration::from_secs(900);
+/// How long one IDLE lasts before it is renewed. Short enough that a connection that died
+/// quietly (sleep, a network change) is noticed within a few minutes.
+const IDLE_FOR: Duration = Duration::from_secs(240);
 /// How long one pass may spend preloading before it goes back to check for new mail.
 const PRELOAD_BUDGET: Duration = Duration::from_secs(40);
 /// How often opening a conversation re-checks All Mail for replies sent from elsewhere.
@@ -36,10 +42,13 @@ pub struct App {
     /// Conversations opened by hand are topped up one at a time, so paging quickly
     /// through the list cannot open a pile of connections to Gmail.
     hydrating: Mutex<()>,
-    wake: Mutex<Option<mpsc::Sender<()>>>,
+    /// Requests for a sync pass: one account, or `None` for all of them.
+    wake: Mutex<Option<mpsc::Sender<Option<i64>>>>,
+    /// Accounts that have a watcher thread, and whether its IDLE connection is up right now.
+    watchers: Mutex<HashMap<i64, bool>>,
     push_wake: Mutex<Option<mpsc::Sender<()>>>,
-    /// (a pass is running, Unix time of the next scheduled pass)
-    status: Mutex<(bool, i64)>,
+    /// (a pass is running, Unix time of the next scheduled pass, seconds between passes)
+    status: Mutex<(bool, i64, u64)>,
     pub agent: crate::agent::AgentState,
 }
 
@@ -54,8 +63,9 @@ impl App {
             hydrated: Mutex::new(HashMap::new()),
             hydrating: Mutex::new(()),
             wake: Mutex::new(None),
+            watchers: Mutex::new(HashMap::new()),
             push_wake: Mutex::new(None),
-            status: Mutex::new((true, 0)),
+            status: Mutex::new((true, 0, SYNC_EVERY.as_secs())),
             agent: Default::default(),
         })
     }
@@ -81,20 +91,87 @@ impl App {
 
     /// What the sync button shows: whether a pass is running and when the next one is due.
     pub fn sync_status(&self) -> serde_json::Value {
-        let (syncing, next) = *self.status.lock().unwrap();
-        serde_json::json!({ "syncing": syncing, "next": next, "every": SYNC_EVERY.as_secs() })
+        let (syncing, next, every) = *self.status.lock().unwrap();
+        serde_json::json!({ "syncing": syncing, "next": next, "every": every, "live": self.all_watched() })
     }
 
-    fn set_status(&self, syncing: bool, next: i64) {
-        *self.status.lock().unwrap() = (syncing, next);
+    fn set_status(&self, syncing: bool, next: i64, every: u64) {
+        *self.status.lock().unwrap() = (syncing, next, every);
         self.emit("sync", &self.sync_status().to_string());
     }
 
     /// Ask the background thread to sync now instead of waiting for its timer.
     pub fn sync_soon(&self) {
+        self.request_sync(None);
+    }
+
+    fn request_sync(&self, account: Option<i64>) {
         if let Some(tx) = self.wake.lock().unwrap().as_ref() {
-            let _ = tx.send(());
+            let _ = tx.send(account);
         }
+    }
+
+    /// True when every account has a live IDLE connection.
+    fn all_watched(&self) -> bool {
+        let w = self.watchers.lock().unwrap();
+        !w.is_empty() && w.values().all(|up| *up)
+    }
+
+    /// Keep an IDLE connection open on an account's inbox and ask for a sync of that account
+    /// the moment Gmail reports a change, instead of waiting for the timer.
+    fn watch(self: &Arc<App>, account_id: i64) {
+        {
+            let mut w = self.watchers.lock().unwrap();
+            if w.contains_key(&account_id) {
+                return; // already being watched
+            }
+            w.insert(account_id, false);
+        }
+        let app = self.clone();
+        std::thread::spawn(move || {
+            let set_up = |up: bool| {
+                let was = app.watchers.lock().unwrap().insert(account_id, up);
+                if was != Some(up) {
+                    app.emit("sync", &app.sync_status().to_string()); // the sync button shows it
+                }
+            };
+            let mut retry = Duration::from_secs(15);
+            let mut dropped = false;
+            loop {
+                let Ok(Some(acct)) = app.db.account(account_id) else { break }; // account removed
+                let result = (|| -> Result<()> {
+                    let mut imap = app.connect(&acct.email)?;
+                    imap.select("INBOX", true)?;
+                    if dropped {
+                        // whatever happened while the connection was down was missed
+                        app.request_sync(Some(account_id));
+                        app.log(&format!("{}: watching the inbox again", acct.email));
+                    }
+                    loop {
+                        let changed = imap.idle(IDLE_FOR, || set_up(true))?;
+                        dropped = false;
+                        retry = Duration::from_secs(15);
+                        if changed {
+                            app.request_sync(Some(account_id));
+                        }
+                        if !matches!(app.db.account(account_id), Ok(Some(_))) {
+                            imap.logout();
+                            return Ok(());
+                        }
+                    }
+                })();
+                set_up(false);
+                if let Err(e) = result {
+                    if !dropped {
+                        app.log(&format!("{}: stopped watching the inbox ({e:#}); retrying", acct.email));
+                    }
+                    dropped = true;
+                    std::thread::sleep(retry);
+                    retry = (retry * 2).min(Duration::from_secs(300));
+                }
+            }
+            app.watchers.lock().unwrap().remove(&account_id);
+        });
     }
 
     pub fn start(self: &Arc<App>) {
@@ -115,10 +192,18 @@ impl App {
         let app = self.clone();
         std::thread::spawn(move || {
             app.refresh_summaries();
+            // which accounts this pass covers; None means all of them
+            let mut only: Option<Vec<i64>> = None;
+            let mut next_full = 0i64;
             loop {
-                app.set_status(true, 0);
+                let every = if app.all_watched() { SYNC_EVERY_WATCHED } else { SYNC_EVERY };
+                app.set_status(true, 0, every.as_secs());
                 let mut more = false;
                 for acct in app.db.accounts().unwrap_or_default() {
+                    app.watch(acct.id);
+                    if only.as_ref().is_some_and(|ids| !ids.contains(&acct.id)) {
+                        continue;
+                    }
                     let result = app.sync_account(acct.id, &acct.email);
                     let err = result.as_ref().err().map(|e| format!("{e:#}"));
                     if let Some(e) = &err {
@@ -129,13 +214,49 @@ impl App {
                     app.emit("synced", &acct.email);
                 }
                 // While there is still mail to preload, go straight round again.
-                let wait = if more { Duration::from_millis(200) } else { SYNC_EVERY };
-                if !more {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                    app.set_status(false, (now + wait.as_secs()) as i64);
+                // A pass for one account (Gmail just told us something changed there) leaves
+                // the timer for the next full pass where it was.
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+                let every = if app.all_watched() { SYNC_EVERY_WATCHED } else { SYNC_EVERY }.as_secs();
+                if only.is_none() || next_full > now + every as i64 {
+                    next_full = now + every as i64;
                 }
-                let _ = rx.recv_timeout(wait);
-                while rx.try_recv().is_ok() {} // collapse a burst of requests into one pass
+                if more {
+                    // While there is still mail to preload, go straight round again.
+                    std::thread::sleep(Duration::from_millis(200));
+                    while rx.try_recv().is_ok() {}
+                    only = None;
+                    continue;
+                }
+                app.set_status(false, next_full, every);
+                // Wait for the timer or a request, looking up now and then: if a watcher has
+                // dropped meanwhile, the long wait is cut back to the ordinary one.
+                let mut asked: Vec<Option<i64>> = Vec::new();
+                loop {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+                    let short = SYNC_EVERY.as_secs();
+                    if !app.all_watched() && next_full > now + short as i64 {
+                        next_full = now + short as i64;
+                        app.set_status(false, next_full, short);
+                    }
+                    if next_full <= now {
+                        break;
+                    }
+                    match rx.recv_timeout(Duration::from_secs(((next_full - now) as u64).min(20))) {
+                        Ok(a) => {
+                            asked.push(a);
+                            break;
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                // collapse a burst of requests into one pass
+                asked.extend(rx.try_iter());
+                only = match !asked.is_empty() && asked.iter().all(Option::is_some) {
+                    true => Some(asked.into_iter().flatten().collect()),
+                    false => None, // the timer ran out, or someone asked for everything
+                };
             }
         });
     }
@@ -612,7 +733,7 @@ impl App {
         }
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-            let _ = writeln!(f, "{secs} {line}");
+            let _ = f.write_all(format!("{secs} {line}\n").as_bytes());
         }
     }
 }

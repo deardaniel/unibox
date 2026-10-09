@@ -996,10 +996,15 @@ function renderSync() {
   const busy = sync.syncing || left === 0;
   const b = $("#sync");
   b.classList.toggle("busy", busy);
-  // The border fills as the wait runs down; while syncing it is empty and the arrow spins.
-  b.style.setProperty("--p", busy ? 0 : Math.min(1, 1 - (left - 1) / sync.every));
+  // Every account has an open connection that Gmail pushes changes down: no countdown to
+  // show, the button just glows.
+  const live = !!sync.live && !busy;
+  b.classList.toggle("live", live);
+  // Otherwise the border fills as the wait runs down; while syncing it is empty and the arrow spins.
+  b.style.setProperty("--p", busy || live ? 0 : Math.min(1, 1 - (left - 1) / sync.every));
   const s = Math.ceil(left);
   b.title = busy ? "Syncing: checking Gmail for new mail and changes"
+    : live ? "Connected to Gmail: new mail shows up as it arrives. Click to check now."
     : `Next automatic check in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}. Click to check now.`;
 }
 function setSync(s) { Object.assign(sync, s); renderSync(); }

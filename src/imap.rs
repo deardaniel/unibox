@@ -175,8 +175,13 @@ pub type Fetched = HashMap<String, Val>;
 
 pub struct Imap {
     io: BufReader<Box<dyn Stream>>,
+    /// A second handle on the socket, for changing its read timeout while idling.
+    tcp: TcpStream,
     tag: u32,
 }
+
+/// How long a command may wait for the server.
+const TIMEOUT: Duration = Duration::from_secs(90);
 
 impl Imap {
     /// Connect and log in. `server` is `host:port`; a `plain:` prefix skips TLS
@@ -187,8 +192,9 @@ impl Imap {
             None => (false, server),
         };
         let tcp = TcpStream::connect(addr).with_context(|| format!("connecting to {addr}"))?;
-        tcp.set_read_timeout(Some(Duration::from_secs(90)))?;
-        tcp.set_write_timeout(Some(Duration::from_secs(90)))?;
+        tcp.set_read_timeout(Some(TIMEOUT))?;
+        tcp.set_write_timeout(Some(TIMEOUT))?;
+        let handle = tcp.try_clone()?;
         let stream: Box<dyn Stream> = if plain {
             Box::new(tcp)
         } else {
@@ -202,7 +208,7 @@ impl Imap {
             let conn = rustls::ClientConnection::new(Arc::new(config), name)?;
             Box::new(rustls::StreamOwned::new(conn, tcp))
         };
-        let mut imap = Imap { io: BufReader::new(stream), tag: 0 };
+        let mut imap = Imap { io: BufReader::new(stream), tcp: handle, tag: 0 };
         imap.read_response()?; // greeting
         imap.run(&format!("LOGIN {} {}", quote(user), quote(password)))
             .map_err(|e| anyhow!("login failed: {e}"))?;
@@ -357,6 +363,77 @@ impl Imap {
             }
         }
         Ok(out)
+    }
+
+    /// Sit in IDLE on the selected mailbox until the server reports a change there (new
+    /// mail, something removed, a flag changed) or `wait` runs out. Returns whether
+    /// anything changed. The connection is back in its normal state afterwards.
+    /// `started` is called once the server has agreed to idle.
+    pub fn idle(&mut self, wait: Duration, started: impl FnOnce()) -> Result<bool> {
+        self.tag += 1;
+        let tag = format!("U{}", self.tag);
+        let w = self.io.get_mut();
+        w.write_all(format!("{tag} IDLE\r\n").as_bytes())?;
+        w.flush()?;
+        let is_change = |r: &[Val]| {
+            r.first().map(Val::text).as_deref() == Some("*")
+                && matches!(r.get(2).map(|v| v.text().to_uppercase()).as_deref(), Some("EXISTS" | "EXPUNGE" | "FETCH"))
+        };
+        let tagged = |r: &[Val]| -> Option<Result<()>> {
+            (r.first().map(Val::text).as_deref() == Some(tag.as_str())).then(|| {
+                match r.get(1).map(Val::text).unwrap_or_default().to_uppercase().as_str() {
+                    "OK" => Ok(()),
+                    _ => Err(anyhow!("IDLE: {}", r.iter().skip(1).map(Val::text).collect::<Vec<_>>().join(" "))),
+                }
+            })
+        };
+        let mut changed = false;
+        // wait for the go-ahead ("+ idling"); a server without IDLE answers with the tag instead
+        loop {
+            let r = self.read_response()?;
+            if let Some(done) = tagged(&r) {
+                done?;
+                bail!("IDLE ended before it started");
+            }
+            changed |= is_change(&r);
+            if r.first().map(Val::text).as_deref() == Some("+") {
+                break;
+            }
+        }
+        started();
+        let until = std::time::Instant::now() + wait;
+        while !changed {
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            self.tcp.set_read_timeout(Some(left))?;
+            match self.read_response() {
+                // Gmail also sends "* OK Still here" now and then; only real changes count
+                Ok(r) => changed = is_change(&r),
+                Err(e) => {
+                    let timed_out = e.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                        matches!(io.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+                    });
+                    if !timed_out {
+                        return Err(e);
+                    }
+                    break;
+                }
+            }
+        }
+        self.tcp.set_read_timeout(Some(TIMEOUT))?;
+        let w = self.io.get_mut();
+        w.write_all(b"DONE\r\n")?;
+        w.flush()?;
+        loop {
+            let r = self.read_response()?;
+            if let Some(done) = tagged(&r) {
+                done?;
+                return Ok(changed);
+            }
+            changed |= is_change(&r);
+        }
     }
 
     pub fn logout(mut self) {
