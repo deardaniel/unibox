@@ -806,6 +806,19 @@ function selectAll(on) {
   renderList();
   if (on) toast(`${state.selected.size} conversations selected. Esc to clear.`);
 }
+// Space, PageUp/PageDown, Home and End always move the open conversation, wherever focus is,
+// so j/k can pick one and the same hand can read it.
+function scrollKeys(e) {
+  const k = e.key;
+  if (![" ", "PageDown", "PageUp", "Home", "End"].includes(k)) return false;
+  const v = document.querySelector("body.reading .view.on");
+  if (!v) return true;   // nothing open: still keep these keys off the list
+  const page = Math.max(80, v.clientHeight - 60);
+  if (k === "Home") v.scrollTop = 0;
+  else if (k === "End") v.scrollTop = v.scrollHeight;
+  else v.scrollTop += (k === "PageUp" || (k === " " && e.shiftKey)) ? -page : page;
+  return true;
+}
 function onKey(e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !SOLO) { toggleAssistant(true); return e.preventDefault(); }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -824,6 +837,7 @@ function onKey(e) {
     return;
   }
   const k = e.key;
+  if (scrollKeys(e)) return e.preventDefault();
   if (SOLO) {
     // One conversation, no list: only the keys that make sense here.
     const solo = { n: () => focusMessage(state.open.focus + 1), p: () => focusMessage(state.open.focus - 1),
