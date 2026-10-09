@@ -613,7 +613,9 @@ impl Db {
             .optional()?;
         let Some((from, group)) = source else { return Ok(vec![]) };
         let group = group.filter(|g| !g.is_empty());
-        if group.is_none() && from.is_empty() {
+        // never "everything from me": that is every conversation the owner replied in
+        let own: bool = c.prepare("SELECT 1 FROM accounts WHERE email=? COLLATE NOCASE")?.exists([&from])?;
+        if group.is_none() && (from.is_empty() || own) {
             return Ok(vec![]);
         }
         let mut st = c.prepare(

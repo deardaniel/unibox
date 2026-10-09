@@ -555,7 +555,10 @@ async function messageMenu(anchor, node, m) {
   item("html", "Formatted", !!parts);
   item("text", "Plain text", !!parts?.text);
   item("source", "Original message", !!parts);
-  {
+  // not on your own mail: recognised by the account's address, or (for an alias you send as)
+  // by Gmail having recorded no check, which only happens to mail sent from the account
+  const mine = state.accounts.some(a => a.email.toLowerCase() === m.from_addr.toLowerCase()) || (m.trust && m.trust.level === "none");
+  if (!mine) {
     const from = m.facts?.group?.address ? "the group " + m.facts.group.address : m.from_name || m.from_addr;
     const b = el("button", "sep", `Archive everything from ${from}…`);
     b.title = "Archive every inbox conversation from this " + (m.facts?.group?.address ? "group" : "sender");
