@@ -1,0 +1,5 @@
+target/
+*.db
+*.db-*
+__pycache__/
+.playwright-mcp/

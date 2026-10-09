@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unibox</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<aside id="side">
+  <div id="brand">Unibox</div>
+  <nav id="accounts"></nav>
+  <button id="add" class="quiet">+ Add account</button>
+  <div id="status"></div>
+</aside>
+
+<main>
+  <header id="top">
+    <input id="search" type="search" placeholder="Search the inbox  ( / )" autocomplete="off" spellcheck="false">
+    <button id="sync" title="Check for new mail">Sync</button>
+    <button id="help" title="Keyboard shortcuts (?)">?</button>
+  </header>
+
+  <section id="list" tabindex="-1"></section>
+
+  <section id="thread" hidden>
+    <div id="thread-bar">
+      <button data-act="back" title="Back to inbox (u)">← Inbox</button>
+      <button data-act="archive" title="Archive (e)">Archive</button>
+      <button data-act="unread" title="Mark as unread (Shift+U)">Mark unread</button>
+      <button data-act="star" title="Star (s)">Star</button>
+      <button data-act="reply" title="Open this conversation in Gmail to reply (r)">Reply in Gmail</button>
+    </div>
+    <h1 id="thread-subject"></h1>
+    <div id="messages"></div>
+  </section>
+</main>
+
+<dialog id="add-dialog">
+  <form method="dialog" id="add-form">
+    <h2>Add a Gmail account</h2>
+    <p>Unibox signs in with an <a href="https://myaccount.google.com/apppasswords" data-external>app password</a>,
+       not your normal password. It is kept in the Windows Credential Manager on this PC.</p>
+    <label>Email address <input name="email" type="email" required autocomplete="off" placeholder="you@gmail.com"></label>
+    <label>App password <input name="password" type="password" required autocomplete="off" placeholder="16 letters"></label>
+    <p id="add-error" role="alert"></p>
+    <div class="row">
+      <button type="button" id="add-cancel" class="quiet">Cancel</button>
+      <button type="submit" id="add-submit" class="primary">Add account</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="help-dialog">
+  <h2>Keyboard shortcuts</h2>
+  <table>
+    <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Next / previous conversation</td></tr>
+    <tr><td><kbd>o</kbd> or <kbd>Enter</kbd></td><td>Open conversation</td></tr>
+    <tr><td><kbd>u</kbd> or <kbd>Esc</kbd></td><td>Back to the inbox</td></tr>
+    <tr><td><kbd>n</kbd> <kbd>p</kbd></td><td>Next / previous message in a conversation</td></tr>
+    <tr><td><kbd>e</kbd></td><td>Archive</td></tr>
+    <tr><td><kbd>s</kbd></td><td>Star or unstar</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>i</kbd> / <kbd>Shift</kbd>+<kbd>u</kbd></td><td>Mark read / unread</td></tr>
+    <tr><td><kbd>x</kbd></td><td>Select conversation (actions then apply to all selected)</td></tr>
+    <tr><td><kbd>r</kbd></td><td>Reply (opens the conversation in Gmail)</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Search</td></tr>
+    <tr><td><kbd>g</kbd> then <kbd>i</kbd></td><td>All inboxes</td></tr>
+    <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Show only that account (<kbd>0</kbd> for all)</td></tr>
+  </table>
+  <form method="dialog" class="row"><button class="primary">Close</button></form>
+</dialog>
+
+<div id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

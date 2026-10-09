@@ -1,0 +1,3 @@
+# Windows build is cross-compiled from WSL with llvm-mingw (see build.sh).
+[target.x86_64-pc-windows-gnullvm]
+linker = "x86_64-w64-mingw32-clang"
