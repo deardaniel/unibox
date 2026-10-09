@@ -21,6 +21,8 @@
     <input id="search" type="search" placeholder="Search the inbox  ( / )" autocomplete="off" spellcheck="false">
     <button id="sync" aria-label="Sync"><svg class="spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
+    <button id="ask" title="Assistant (Ctrl+K)" aria-label="Assistant"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"
+      aria-hidden="true"><path d="M12 2l1.9 5.6a3 3 0 0 0 1.9 1.9L21.4 11.4 15.8 13.3a3 3 0 0 0-1.9 1.9L12 20.8l-1.9-5.6a3 3 0 0 0-1.9-1.9L2.6 11.4l5.6-1.9a3 3 0 0 0 1.9-1.9z"/></svg></button>
     <button id="help" title="Keyboard shortcuts (?)">?</button>
   </header>
 
@@ -40,6 +42,30 @@
       <!-- One .view per conversation; several are kept rendered so opening is instant. -->
       <div id="views"><div id="pane-empty">Select a conversation to read it here.</div></div>
     </section>
+
+    <!-- The assistant: a conversation that persists, can see what is on screen, and can drive the list. -->
+    <aside id="assistant" hidden>
+      <header>
+        <span class="title">Assistant</span>
+        <button data-as="new" class="quiet" title="Start a new conversation with the assistant">New chat</button>
+        <button data-as="settings" class="quiet" title="API key and model">Settings</button>
+        <button data-as="close" class="quiet" title="Close (Esc)">✕</button>
+      </header>
+      <div id="as-log"></div>
+      <form id="as-setup" hidden>
+        <p>The assistant runs on Claude. It needs an Anthropic API key, kept in the Windows Credential Manager.</p>
+        <p class="note">When you ask it something, the mail it reads to answer is sent to the endpoint below.</p>
+        <label>API key <input name="api_key" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
+        <label>Model <input name="model" autocomplete="off" spellcheck="false"></label>
+        <label>Endpoint <input name="base_url" autocomplete="off" spellcheck="false"></label>
+        <p id="as-setup-error" role="alert"></p>
+        <div class="row"><button type="button" data-as="cancel-setup" class="quiet">Cancel</button><button class="primary">Save</button></div>
+      </form>
+      <form id="as-form">
+        <textarea id="as-input" rows="2" placeholder="Ask about your mail, or tell it what to do…"></textarea>
+        <button id="as-send" class="primary">Send</button>
+      </form>
+    </aside>
   </div>
 </main>
 
@@ -74,6 +100,7 @@
     <tr><td><kbd>*</kbd> then <kbd>a</kbd> / <kbd>n</kbd></td><td>Select all / none</td></tr>
     <tr><td><kbd>r</kbd></td><td>Reply (opens the conversation in Gmail)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Open the assistant</td></tr>
     <tr><td><kbd>g</kbd> then <kbd>i</kbd></td><td>Back to all inboxes, clearing any search</td></tr>
     <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Show only that account (<kbd>0</kbd> for all)</td></tr>
   </table>

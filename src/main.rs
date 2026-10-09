@@ -1,6 +1,7 @@
 // Release builds on Windows are a GUI program: no console window behind the app.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agent;
 mod db;
 mod imap;
 mod mime;
@@ -133,6 +134,9 @@ async fn remove_account(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api
 #[derive(Deserialize)]
 struct ThreadQuery {
     account: Option<i64>,
+    /// Show the set of conversations the assistant picked instead of the inbox.
+    #[serde(default)]
+    collection: bool,
     #[serde(default)]
     q: String,
     #[serde(default)]
@@ -140,7 +144,71 @@ struct ThreadQuery {
 }
 
 async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>) -> Api<Json<Vec<db::ThreadRow>>> {
-    Ok(Json(blocking(move || app.db.threads(q.account, q.q.trim(), 60, q.offset.max(0))).await?))
+    Ok(Json(
+        blocking(move || {
+            if q.collection {
+                let keys = app.agent.collection.lock().unwrap().as_ref().map(|c| c.keys.clone()).unwrap_or_default();
+                let rows = app.db.threads_by_keys(&keys)?;
+                return Ok(rows.into_iter().skip(q.offset.max(0) as usize).take(60).collect());
+            }
+            app.db.threads(q.account, q.q.trim(), 60, q.offset.max(0))
+        })
+        .await?,
+    ))
+}
+
+// ---- the assistant ---------------------------------------------------------
+async fn agent_view(State(app): State<Arc<App>>) -> Api<Json<serde_json::Value>> {
+    Ok(Json(blocking(move || app.agent_view()).await?))
+}
+
+#[derive(Deserialize)]
+struct AgentMessage {
+    text: String,
+    /// What the window is showing right now, so "this email" and "these" mean something.
+    #[serde(default)]
+    state: serde_json::Value,
+}
+
+fn bad_request(e: anyhow::Error) -> ApiError {
+    ApiError(StatusCode::BAD_REQUEST, format!("{e:#}"))
+}
+
+async fn agent_send(State(app): State<Arc<App>>, Json(m): Json<AgentMessage>) -> Api<StatusCode> {
+    tokio::task::spawn_blocking(move || app.agent_send(&m.text, &m.state))
+        .await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(bad_request)?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn agent_reset(State(app): State<Arc<App>>) -> Api<StatusCode> {
+    app.agent_reset().map_err(bad_request)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn agent_stop(State(app): State<Arc<App>>) -> StatusCode {
+    app.agent_stop();
+    StatusCode::NO_CONTENT
+}
+
+async fn agent_clear_collection(State(app): State<Arc<App>>) -> StatusCode {
+    app.agent_clear_collection();
+    StatusCode::NO_CONTENT
+}
+
+#[derive(Deserialize)]
+struct AgentConfig {
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    model: String,
+    api_key: Option<String>,
+}
+
+async fn agent_configure(State(app): State<Arc<App>>, Json(c): Json<AgentConfig>) -> Api<StatusCode> {
+    app.agent_configure(&c.base_url, &c.model, c.api_key.as_deref()).map_err(bad_request)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -433,6 +501,11 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/unarchive", post(unarchive))
+        .route("/api/agent", get(agent_view).post(agent_send))
+        .route("/api/agent/reset", post(agent_reset))
+        .route("/api/agent/stop", post(agent_stop))
+        .route("/api/agent/config", post(agent_configure))
+        .route("/api/agent/collection/clear", post(agent_clear_collection))
         .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/message/:id/attachment/:index/preview", get(attachment_preview))

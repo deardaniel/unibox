@@ -40,6 +40,7 @@ pub struct App {
     push_wake: Mutex<Option<mpsc::Sender<()>>>,
     /// (a pass is running, Unix time of the next scheduled pass)
     status: Mutex<(bool, i64)>,
+    pub agent: crate::agent::AgentState,
 }
 
 impl App {
@@ -55,6 +56,7 @@ impl App {
             wake: Mutex::new(None),
             push_wake: Mutex::new(None),
             status: Mutex::new((true, 0)),
+            agent: Default::default(),
         })
     }
 
@@ -66,7 +68,7 @@ impl App {
         self.locks.lock().unwrap().entry(account_id).or_default().clone()
     }
 
-    fn connect(&self, email: &str) -> Result<Imap> {
+    pub(crate) fn connect(&self, email: &str) -> Result<Imap> {
         let password = secrets::get(&self.dir, email)?;
         Imap::connect(&self.imap_server, email, &password)
     }

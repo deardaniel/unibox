@@ -40,6 +40,29 @@ pub fn parse_headers(raw: &[u8]) -> Headers {
     }
 }
 
+/// What a reply to a message needs from it.
+pub struct ReplyHeaders {
+    /// Who to answer: Reply-To if the message has one, otherwise its sender.
+    pub to: String,
+    pub message_id: String,
+    /// The message's own References, to be extended with its id.
+    pub references: String,
+}
+
+pub fn reply_headers(raw: &[u8]) -> ReplyHeaders {
+    let msg = MessageParser::default().parse(raw);
+    let msg = msg.as_ref();
+    let reply_to = addr_list(msg.and_then(|m| m.reply_to()));
+    ReplyHeaders {
+        to: if reply_to.is_empty() { addr_list(msg.and_then(|m| m.from())) } else { reply_to },
+        message_id: msg.and_then(|m| m.message_id()).unwrap_or_default().to_string(),
+        references: msg
+            .and_then(|m| m.header_raw("References"))
+            .map(|r| r.split_whitespace().collect::<Vec<_>>().join(" "))
+            .unwrap_or_default(),
+    }
+}
+
 #[derive(Serialize)]
 pub struct Attachment {
     pub index: usize,
@@ -377,6 +400,17 @@ Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
         // the message's rule survives sanitising, so ours has to be the more specific one
         assert!(html.contains("height: 100% !important"));
         assert!(html.contains("html:root,html:root>body{height:auto!important"));
+    }
+
+    #[test]
+    fn reply_headers_come_from_the_message() {
+        let msg = b"From: Aoife <aoife@example.com>\r\nReply-To: list@example.com\r\nSubject: s\r\n\
+Message-ID: <abc@mail.example.com>\r\nReferences: <one@x>\r\n <two@x>\r\n\r\nhi\r\n";
+        let r = reply_headers(msg);
+        assert_eq!(r.to, "list@example.com");
+        assert_eq!(r.message_id, "abc@mail.example.com");
+        assert_eq!(r.references, "<one@x> <two@x>");
+        assert_eq!(reply_headers(MSG).to, "Matt Leviné <matt@example.com>");
     }
 
     #[test]

@@ -26,6 +26,7 @@ const state = {
   selected: new Set(),   // thread keys
   views: new Map(),      // thread key -> rendered conversation, oldest first
   open: null,            // the view on screen
+  collection: null,      // { title }: the list is showing a set the assistant picked
 };
 const key = t => t.account_id + ":" + t.thrid;
 
@@ -177,6 +178,7 @@ async function removeAccount(a) {
 }
 
 function setFilter(id) {
+  leaveCollection();
   state.filter = id;
   state.cursor = 0;
   state.selected.clear();
@@ -187,11 +189,24 @@ function setFilter(id) {
 }
 
 // ---- conversation list -------------------------------------------------------
-async function loadThreads(reset) {
-  const offset = reset ? 0 : state.threads.length;
+/** What to ask the server for: the inbox (filtered, searched), or the assistant's set. */
+function listParams(offset) {
+  if (state.collection) return new URLSearchParams({ collection: true, offset });
   const p = new URLSearchParams({ q: state.q, offset });
   if (state.filter != null) p.set("account", state.filter);
-  const rows = await api("/api/threads?" + p);
+  return p;
+}
+
+/** Stop showing the assistant's set and go back to the ordinary list. */
+function leaveCollection() {
+  if (!state.collection) return;
+  state.collection = null;
+  api("/api/agent/collection/clear", { method: "POST" }).catch(() => {});
+}
+
+async function loadThreads(reset) {
+  const offset = reset ? 0 : state.threads.length;
+  const rows = await api("/api/threads?" + listParams(offset));
   state.threads = reset ? applyOverrides(rows) : state.threads.concat(applyOverrides(rows));
   state.more = rows.length === 60;
   renderList();
@@ -202,6 +217,15 @@ function renderList() {
   const list = $("#list");
   const top = list.scrollTop;
   list.textContent = "";
+  if (state.collection) {
+    const bar = el("div");
+    bar.id = "set-bar";
+    const back = el("button", "", "✕");
+    back.title = "Back to the inbox";
+    back.onclick = () => goInbox();
+    bar.append(el("span", "name", `${state.collection.title} · ${state.threads.length}${state.more ? "+" : ""}`), back);
+    list.append(bar);
+  }
   state.cursor = Math.max(0, Math.min(state.cursor, state.threads.length - 1));
   if (!state.threads.length) {
     list.append(el("div", "empty",
@@ -225,6 +249,7 @@ function renderList() {
     const marks = el("span", "marks");
     if (t.has_attach) marks.append("📎");
     if (t.starred) marks.append(el("span", "star", "★"));
+    if (t.in_inbox === false) marks.append(el("span", "gone", "Archived"));
     const date = el("span", "date");
     date.append(el("span", "d", fmtDate(t.date)));
     row.append(el("span", "bar"), av, who, text, marks, date);
@@ -244,7 +269,7 @@ function renderList() {
 function setCursor(i) {
   const n = state.threads.length;
   state.cursor = Math.max(0, Math.min(n - 1, i));
-  const rows = $("#list").children;
+  const rows = $("#list").querySelectorAll(".row-t");
   for (let r = 0; r < rows.length; r++) rows[r].classList.toggle("cursor", r === state.cursor);
   rows[state.cursor]?.scrollIntoView({ block: "nearest" });
   if (state.more && state.cursor > n - 15) loadThreads(false);
@@ -361,7 +386,7 @@ function hideView() {
 }
 
 function markOpenRow() {
-  const rows = $("#list").children;
+  const rows = $("#list").querySelectorAll(".row-t");
   state.threads.forEach((t, i) => rows[i]?.classList.toggle("open", state.open?.key === key(t)));
 }
 
@@ -773,7 +798,7 @@ let gPending = 0, starPending = 0;
 function goInbox() {
   $("#search").value = "";
   state.q = "";
-  setFilter(null);
+  setFilter(null);   // also leaves any set the assistant was showing
 }
 
 function selectAll(on) {
@@ -782,6 +807,7 @@ function selectAll(on) {
   if (on) toast(`${state.selected.size} conversations selected. Esc to clear.`);
 }
 function onKey(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !SOLO) { toggleAssistant(true); return e.preventDefault(); }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (preview.m) {
     // while an attachment is up, the keyboard belongs to it
@@ -857,7 +883,7 @@ document.addEventListener("keydown", onKey);
 let searchTimer;
 $("#search").addEventListener("input", e => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { state.q = e.target.value.trim(); state.cursor = 0; hideView(); loadThreads(true); }, 200);
+  searchTimer = setTimeout(() => { leaveCollection(); state.q = e.target.value.trim(); state.cursor = 0; hideView(); loadThreads(true); }, 200);
 });
 $("#search").addEventListener("keydown", e => { if (e.key === "Enter") { e.target.blur(); $("#list").focus(); } });
 
@@ -908,18 +934,193 @@ $("#add-form").addEventListener("submit", async e => {
   btn.textContent = "Add account";
 });
 
+// ---- assistant ---------------------------------------------------------------
+const assistant = { data: null, setup: false };
+
+function toggleAssistant(focus) {
+  const panel = $("#assistant");
+  // Ctrl+K on an open panel just puts the cursor in it; the button and Esc close it
+  if (focus && !panel.hidden) return $("#as-input").focus();
+  panel.hidden = !panel.hidden;
+  $("#ask").classList.toggle("on", !panel.hidden);
+  store.set("assistant", panel.hidden ? "closed" : "open");
+  if (!panel.hidden) loadAssistant().then(() => focus && $("#as-input").focus());
+}
+$("#ask").onclick = () => toggleAssistant(true);
+
+async function loadAssistant() {
+  if ($("#assistant").hidden) return;
+  assistant.data = await api("/api/agent");
+  renderAssistant();
+}
+
+/** The model writes light Markdown. Build it as elements, never as HTML text. */
+function richText(text) {
+  const out = document.createDocumentFragment();
+  const inline = (node, line) => {
+    for (const part of line.split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
+      if (part.startsWith("**") && part.length > 4) node.append(el("b", "", part.slice(2, -2)));
+      else if (part.startsWith("`") && part.length > 2) node.append(el("code", "", part.slice(1, -1)));
+      else if (part) node.append(part);
+    }
+    return node;
+  };
+  let list = null, fence = null;
+  for (const line of text.split("\n")) {
+    if (line.trim().startsWith("```")) {
+      if (fence) { out.append(fence); fence = null; } else { fence = el("pre"); list = null; }
+      continue;
+    }
+    if (fence) { fence.append(line + "\n"); continue; }
+    const item = line.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/);
+    if (item) {
+      const tag = item[1] ? "OL" : "UL";
+      if (!list || list.tagName !== tag) { list = el(tag.toLowerCase()); out.append(list); }
+      list.append(inline(el("li"), item[2]));
+    } else if (line.trim()) {
+      list = null;
+      out.append(inline(el("p"), line.replace(/^#+\s*/, "")));
+    } else list = null;
+  }
+  if (fence) out.append(fence);
+  return out;
+}
+
+function renderAssistant() {
+  const d = assistant.data;
+  if (!d) return;
+  const log = $("#as-log");
+  const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  log.textContent = "";
+  const setup = !d.configured || assistant.setup;
+  $("#as-setup").hidden = !setup;
+  $("#as-form").hidden = setup;
+  if (setup) {
+    const f = $("#as-setup");
+    if (!f.dataset.filled) { f.model.value = d.model; f.base_url.value = d.base_url; f.dataset.filled = "1"; }
+    f.api_key.placeholder = d.configured ? "(saved; leave empty to keep it)" : "sk-ant-…";
+    f.querySelector('[data-as="cancel-setup"]').hidden = !d.configured;
+  }
+  if (!d.messages.length && !setup) {
+    const hint = el("div", "hint");
+    hint.append(el("b", "", "Ask about your mail, or tell it what to do."),
+      "“Find all my delivery emails”", el("br"), "“Archive the ones from before this year”", el("br"),
+      "“What did they say about the refund?”", el("br"), "“Draft a reply saying Saturday works”");
+    log.append(hint);
+  }
+  for (const m of d.messages) {
+    if (m.role === "user") { log.append(el("div", "as-msg user", m.text)); continue; }
+    const node = el("div", "as-msg");
+    if (m.did.length) {
+      const did = el("div", "as-did");
+      for (const line of m.did) did.append(el("span", "", line));
+      node.append(did);
+    }
+    node.append(richText(m.text));
+    if (node.childNodes.length) log.append(node);
+  }
+  if (d.busy) log.append(el("div", "as-status", d.status || "Working…"));
+  if (d.error) log.append(el("div", "as-error", d.error));
+  $("#as-send").textContent = d.busy ? "Stop" : "Send";
+  if (atEnd || d.busy) log.scrollTop = log.scrollHeight;
+}
+
+/** What the assistant is told about the window with each message, so "this" and "these" mean something. */
+function appState() {
+  const brief = t => ({ account_id: t.account_id, thread_id: t.thrid, subject: t.subject });
+  const now = new Date();
+  const open = state.open && state.threads.find(t => key(t) === state.open.key);
+  return {
+    now: now.toLocaleString("sv") + " " + now.toLocaleDateString("en", { weekday: "long" }),
+    accounts: state.accounts.map(a => ({ account_id: a.id, address: a.email })),
+    list_is_showing: state.collection ? `the set you showed, titled "${state.collection.title}"`
+      : state.q ? `inbox search results for "${state.q}"` : "the inbox",
+    account_filter: state.filter == null ? null : account(state.filter)?.email,
+    conversations_listed: state.threads.length,
+    open: state.open ? brief(open || { ...state.open, subject: state.open.messages[0]?.subject }) : null,
+    selected: state.threads.filter(t => state.selected.has(key(t))).slice(0, 100).map(brief),
+  };
+}
+
+$("#as-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  if (assistant.data?.busy) return api("/api/agent/stop", { method: "POST" });
+  const input = $("#as-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  input.style.height = "";
+  try { await api("/api/agent", { body: { text, state: appState() } }); }
+  catch (err) { input.value = text; toast(err.message); }
+});
+$("#as-input").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); $("#as-form").requestSubmit(); }
+  if (e.key === "Escape") { e.stopPropagation(); e.target.blur(); $("#list").focus(); }
+});
+$("#as-input").addEventListener("input", e => { e.target.style.height = ""; e.target.style.height = Math.min(160, e.target.scrollHeight + 2) + "px"; });
+
+$("#assistant").addEventListener("click", async e => {
+  const act = e.target.dataset?.as;
+  if (act === "close") toggleAssistant(false);
+  if (act === "settings") { assistant.setup = !assistant.setup; renderAssistant(); }
+  if (act === "cancel-setup") { assistant.setup = false; renderAssistant(); }
+  if (act === "new") {
+    if (assistant.data?.messages.length && !confirm("Start a new conversation? The assistant will forget this one.")) return;
+    api("/api/agent/reset", { method: "POST" }).catch(err => toast(err.message));
+  }
+});
+$("#as-setup").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target;
+  $("#as-setup-error").textContent = "";
+  try {
+    await api("/api/agent/config", { body: { base_url: f.base_url.value, model: f.model.value, api_key: f.api_key.value || null } });
+    f.api_key.value = "";
+    assistant.setup = false;
+    loadAssistant();
+  } catch (err) { $("#as-setup-error").textContent = err.message; }
+});
+
+/** The assistant picked a set of conversations: put it in the list. */
+function showCollection(title) {
+  state.collection = { title };
+  state.q = "";
+  $("#search").value = "";
+  state.filter = null;
+  state.cursor = 0;
+  state.selected.clear();
+  hideView();
+  renderAccounts();
+  loadThreads(true);
+}
+
+/** The assistant changed some mail: make it the thing z undoes, exactly as if done by hand. */
+function assistantActed({ op, items }) {
+  if (!items.length) return;
+  lastAction = {
+    op,
+    items: items.map(i => {
+      const index = state.threads.findIndex(t => t.account_id === i.account_id && t.thrid === i.thrid);
+      return { t: state.threads[index] || { account_id: i.account_id, thrid: i.thrid }, index, sent: Promise.resolve({ msgids: i.msgids }) };
+    }),
+  };
+  const what = { archive: "archived", read: "marked read", unread: "marked unread", star: "starred", unstar: "unstarred" }[op];
+  toast(`Assistant ${what} ${items.length} conversation${items.length > 1 ? "s" : ""}. Press z to undo.`);
+  if (op === "archive") {
+    for (const { t } of lastAction.items) { const v = state.views.get(key(t)); if (v) dropView(v); }
+  }
+  refreshSoon();
+}
+
 // ---- live updates ------------------------------------------------------------
 async function refresh() {
   state.accounts = await api("/api/accounts");
   renderAccounts();
   // Re-read as many rows as are on screen, so paging and the cursor survive a refresh.
   const want = Math.max(60, state.threads.length);
-  const p = new URLSearchParams({ q: state.q, offset: 0 });
-  if (state.filter != null) p.set("account", state.filter);
   let rows = [], page;
   do {
-    p.set("offset", rows.length);
-    page = await api("/api/threads?" + p);
+    page = await api("/api/threads?" + listParams(rows.length));
     rows = rows.concat(page);
   } while (page.length === 60 && rows.length < want);
   const at = state.open?.key || (state.threads[state.cursor] && key(state.threads[state.cursor]));
@@ -945,6 +1146,9 @@ function listen() {
     const ev = JSON.parse(e.data);
     if (ev.kind === "error") return toast(ev.detail);
     if (ev.kind === "sync") return setSync(JSON.parse(ev.detail));
+    if (ev.kind === "agent") return SOLO ? null : loadAssistant();
+    if (ev.kind === "agent-show") return SOLO ? null : showCollection(ev.detail);
+    if (ev.kind === "agent-acted") { if (!SOLO) assistantActed(JSON.parse(ev.detail)); return; }
     if (SOLO) { if (state.open) loadView(state.open, true).catch(() => {}); return; }
     if (ev.kind === "thread") {
       for (const v of state.views.values()) if (v.thrid === ev.detail) loadView(v, true).catch(() => {});
@@ -969,6 +1173,7 @@ function listen() {
   await refresh();
   listen();
   api("/api/sync").then(setSync).catch(() => {});
+  if (store.get("assistant") === "open") toggleAssistant(false);
   $("#list").focus();
   if (!state.accounts.length) $("#add-dialog").showModal();
   // Have the top of the inbox rendered before it is asked for.

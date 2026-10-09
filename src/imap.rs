@@ -279,18 +279,54 @@ impl Imap {
 
     /// The quoted name of Gmail's "All Mail" folder, whatever the account's language.
     pub fn all_mail(&mut self) -> Result<String> {
+        self.special_folder("\\All")
+            .map_err(|_| anyhow!("this account has no All Mail folder visible over IMAP (enable it in Gmail's label settings)"))
+    }
+
+    /// The quoted name of the folder Gmail marks with a special-use flag such as `\\All` or `\\Drafts`.
+    pub fn special_folder(&mut self, flag: &str) -> Result<String> {
         for r in self.run("LIST \"\" \"*\"")? {
             if r.get(1).map(Val::text).as_deref() != Some("LIST") {
                 continue;
             }
-            let is_all = r.get(2).map(|f| f.list().iter().any(|a| a.text().eq_ignore_ascii_case("\\All")));
-            if is_all == Some(true) {
+            let has = r.get(2).map(|f| f.list().iter().any(|a| a.text().eq_ignore_ascii_case(flag)));
+            if has == Some(true) {
                 if let Some(name) = r.get(4) {
                     return Ok(quote(&name.text()));
                 }
             }
         }
-        bail!("this account has no All Mail folder visible over IMAP (enable it in Gmail's label settings)")
+        bail!("no {flag} folder visible over IMAP")
+    }
+
+    /// Store a complete message in a mailbox (already quoted), with the given flags.
+    pub fn append(&mut self, mailbox: &str, flags: &str, message: &[u8]) -> Result<()> {
+        self.tag += 1;
+        let tag = format!("U{}", self.tag);
+        let w = self.io.get_mut();
+        w.write_all(format!("{tag} APPEND {mailbox} ({flags}) {{{}}}\r\n", message.len()).as_bytes())?;
+        w.flush()?;
+        loop {
+            let resp = self.read_response()?;
+            match resp.first().map(Val::text).as_deref() {
+                // the server is ready for the message itself
+                Some("+") => {
+                    let w = self.io.get_mut();
+                    w.write_all(message)?;
+                    w.write_all(b"\r\n")?;
+                    w.flush()?;
+                }
+                Some(t) if t == tag => {
+                    let status = resp.get(1).map(Val::text).unwrap_or_default().to_uppercase();
+                    if status == "OK" {
+                        return Ok(());
+                    }
+                    let detail: Vec<String> = resp.iter().skip(1).map(Val::text).collect();
+                    bail!("APPEND: {}", detail.join(" "));
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn uid_fetch(&mut self, set: &str, items: &str) -> Result<Vec<Fetched>> {

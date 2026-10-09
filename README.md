@@ -9,6 +9,17 @@ conversation in Gmail.
 - Mail is cached in SQLite under `%LOCALAPPDATA%\Unibox`; app passwords are kept in the
   Windows Credential Manager.
 
+## The assistant
+
+A chat panel (Ctrl+K) backed by Claude. It persists between sessions, is told what the window
+is showing with each message, and works through five tools defined in `src/agent.rs`:
+read-only SQL over the mail cache, show a set of conversations in the list, read a
+conversation, archive / mark / star, and save a reply as a Gmail draft. It cannot send or
+delete. It needs an Anthropic API key (panel → Settings; stored in the Credential Manager).
+Mail it reads to answer a question is sent to the configured endpoint.
+
+`tests/fake_claude.py` is a scripted stand-in for the API, for testing without a key.
+
 ## How it works
 
 `unibox.exe` is a Rust program that syncs each account over IMAP and serves the UI on
@@ -50,5 +61,6 @@ app wants that one.
 | `src/sync.rs` | Inbox sync, conversation fill-in from All Mail, write-back of actions |
 | `src/mime.rs` | Message parsing, HTML sanitising, attachments |
 | `src/db.rs` | SQLite schema and queries |
+| `src/agent.rs` | The assistant: model loop, tools, draft building |
 | `src/main.rs` | HTTP API, security checks, window launch |
 | `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary) |

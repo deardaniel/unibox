@@ -121,6 +121,7 @@ def mailbox(owner):
 
 
 BOXES = {}
+DRAFTS = {}   # user -> messages saved with APPEND
 
 
 def box(user):
@@ -173,6 +174,7 @@ class Handler(socketserver.StreamRequestHandler):
                     self.send('* LIST (\\HasNoChildren) "/" "INBOX"\r\n'
                               '* LIST (\\HasChildren \\Noselect) "/" "[Gmail]"\r\n'
                               '* LIST (\\All \\HasNoChildren) "/" "[Gmail]/All Mail"\r\n'
+                              '* LIST (\\Drafts \\HasNoChildren) "/" "[Gmail]/Drafts"\r\n'
                               f"{tag} OK Success\r\n")
                 elif cmd in ("SELECT", "EXAMINE"):
                     selected = "inbox" if args.strip('"').upper() == "INBOX" else "all"
@@ -207,6 +209,15 @@ class Handler(socketserver.StreamRequestHandler):
                         for f in re.findall(r"\\\w+", flags):
                             (msgs[uid].flags.add if op.startswith("+") else msgs[uid].flags.discard)(f)
                     self.send(f"{tag} OK Success\r\n")
+                elif cmd == "APPEND":
+                    # APPEND "mailbox" (flags) {n}  then the message itself
+                    size = int(re.search(r"\{(\d+)\}$", args).group(1))
+                    self.send("+ go ahead\r\n")
+                    self.wfile.flush()
+                    message = self.rfile.read(size)
+                    self.rfile.readline()
+                    DRAFTS.setdefault(user, []).append(message)
+                    self.send(f"{tag} OK [APPENDUID 9 {len(DRAFTS[user])}] (Success)\r\n")
                 elif cmd == "UID COPY":
                     # on Gmail, copying into INBOX just adds the Inbox label
                     setstr, _, dest = args.partition(" ")
@@ -227,6 +238,12 @@ class Handler(socketserver.StreamRequestHandler):
                         self.send(f"{tag} OK [COPYUID 7 {setstr} {setstr}] (Success)\r\n")
                     else:
                         self.send(f"{tag} NO [TRYCREATE] No folder {dest} (Failure)\r\n")
+                elif cmd == "XDRAFTS":
+                    # test hook: hand back the newest saved draft
+                    saved = DRAFTS.get(user, [])
+                    body = saved[-1] if saved else b""
+                    self.send(b"* XDRAFTS %d {%d}\r\n" % (len(saved), len(body)) + body + b"\r\n")
+                    self.send(f"{tag} OK done\r\n")
                 else:
                     self.send(f"{tag} OK {cmd} completed\r\n")
 

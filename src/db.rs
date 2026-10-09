@@ -35,6 +35,8 @@ pub struct ThreadRow {
     /// Sender of the newest message, for the avatar.
     pub from_name: String,
     pub from_addr: String,
+    /// False for a conversation shown from outside the inbox (in a set the assistant picked).
+    pub in_inbox: bool,
 }
 
 #[derive(Serialize)]
@@ -134,7 +136,14 @@ impl Db {
                account_id INTEGER NOT NULL,
                gm_thrid TEXT NOT NULL,
                PRIMARY KEY(account_id, gm_thrid));
-             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             -- The assistant's conversation, exactly as exchanged with the model: one row per
+             -- message, content as the API's JSON. Append-only.
+             CREATE TABLE IF NOT EXISTS agent_log(
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               role TEXT NOT NULL,
+               content TEXT NOT NULL,
+               at INTEGER NOT NULL);",
         )?;
         let has_column = |name: &str| -> Result<bool> {
             let mut st = c.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name=?")?;
@@ -290,6 +299,7 @@ impl Db {
                 has_attach: r.get(9)?,
                 from_name: r.get(10)?,
                 from_addr: r.get(11)?,
+                in_inbox: true,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -383,5 +393,168 @@ impl Db {
             params![snippet, body_text, attachments, attachments != "[]", message_id],
         )?;
         Ok(())
+    }
+
+    // ---- the assistant ---------------------------------------------------
+    pub fn agent_append(&self, role: &str, content: &serde_json::Value) -> Result<()> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        self.conn()?.execute(
+            "INSERT INTO agent_log(role, content, at) VALUES(?,?,?)",
+            params![role, content.to_string(), now],
+        )?;
+        Ok(())
+    }
+
+    /// The whole conversation, oldest first, as (role, content).
+    pub fn agent_history(&self) -> Result<Vec<(String, serde_json::Value)>> {
+        let c = self.conn()?;
+        let mut st = c.prepare("SELECT role, content FROM agent_log ORDER BY id")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (role, content) = r?;
+            out.push((role, serde_json::from_str(&content)?));
+        }
+        Ok(out)
+    }
+
+    pub fn agent_clear(&self) -> Result<()> {
+        self.conn()?.execute("DELETE FROM agent_log", [])?;
+        Ok(())
+    }
+
+    /// Run a query the assistant wrote. It gets a connection that cannot write, sees mail
+    /// through the `mail` view, is cut off after a few seconds, and gets at most `max_rows`
+    /// rows with long text shortened. Returns (column names, rows, whether rows were left out).
+    pub fn agent_query(
+        &self,
+        sql: &str,
+        max_rows: usize,
+        max_cell: usize,
+    ) -> Result<(Vec<String>, Vec<Vec<serde_json::Value>>, bool)> {
+        use rusqlite::types::ValueRef;
+        use rusqlite::OpenFlags;
+        let lowered = sql.to_ascii_lowercase();
+        if ["attach", "pragma", "load_extension"].iter().any(|w| lowered.contains(w)) {
+            anyhow::bail!("only plain SELECT queries are allowed");
+        }
+        let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        c.busy_timeout(std::time::Duration::from_secs(5))?;
+        c.execute_batch(
+            "CREATE TEMP VIEW mail AS
+               SELECT m.id AS message_id, a.email AS account, m.account_id, m.gm_thrid AS thread_id,
+                      m.date, datetime(m.date, 'unixepoch', 'localtime') AS date_local,
+                      m.from_name, m.from_addr, m.to_addrs, m.cc_addrs, m.subject, m.snippet, m.body_text,
+                      m.in_inbox, (m.seen = 0) AS unread, m.starred, m.has_attach AS has_attachments, m.size
+                 FROM main.messages m JOIN main.accounts a ON a.id = m.account_id;",
+        )?;
+        let mut st = c.prepare(sql)?;
+        if !st.readonly() {
+            anyhow::bail!("only SELECT queries are allowed");
+        }
+        // A runaway query is interrupted rather than left to hold the app up.
+        let interrupt = c.get_interrupt_handle();
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = finished.clone();
+        std::thread::spawn(move || {
+            for _ in 0..80 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+            }
+            interrupt.interrupt();
+        });
+        let columns: Vec<String> = st.column_names().iter().map(|s| s.to_string()).collect();
+        let mut out = Vec::new();
+        let mut truncated = false;
+        let result = (|| -> Result<()> {
+            let mut rows = st.query([])?;
+            while let Some(row) = rows.next()? {
+                if out.len() >= max_rows {
+                    truncated = true;
+                    break;
+                }
+                let mut cells = Vec::with_capacity(columns.len());
+                for i in 0..columns.len() {
+                    cells.push(match row.get_ref(i)? {
+                        ValueRef::Null => serde_json::Value::Null,
+                        ValueRef::Integer(n) => n.into(),
+                        ValueRef::Real(f) => serde_json::json!(f),
+                        ValueRef::Text(t) => {
+                            let t = String::from_utf8_lossy(t);
+                            if t.chars().count() > max_cell {
+                                format!("{}…", t.chars().take(max_cell).collect::<String>()).into()
+                            } else {
+                                t.into_owned().into()
+                            }
+                        }
+                        ValueRef::Blob(_) => "<binary>".into(),
+                    });
+                }
+                out.push(cells);
+            }
+            Ok(())
+        })();
+        finished.store(true, std::sync::atomic::Ordering::Relaxed);
+        result?;
+        Ok((columns, out, truncated))
+    }
+
+    /// The conversations these messages belong to, as (account id, thread id), without repeats.
+    pub fn threads_of_messages(&self, message_ids: &[i64]) -> Result<Vec<(i64, String)>> {
+        let c = self.conn()?;
+        let mut st = c.prepare("SELECT account_id, gm_thrid FROM messages WHERE id=?")?;
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for id in message_ids {
+            if let Some(key) = st.query_row([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).optional()? {
+                if seen.insert(key.clone()) {
+                    out.push(key);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// List rows for specific conversations, wherever they are (inbox or not), newest first.
+    pub fn threads_by_keys(&self, keys: &[(i64, String)]) -> Result<Vec<ThreadRow>> {
+        let c = self.conn()?;
+        let mut st = c.prepare(
+            "SELECT account_id, gm_thrid, MAX(date) AS newest, subject, snippet,
+                    (SELECT GROUP_CONCAT(n, ', ') FROM (
+                        SELECT CASE WHEN t.from_name='' THEN t.from_addr ELSE t.from_name END AS n
+                          FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid
+                         GROUP BY n ORDER BY MIN(t.date))),
+                    COUNT(*), SUM(seen=0 AND in_inbox=1), SUM(starred)>0, SUM(has_attach)>0,
+                    from_name, from_addr, SUM(in_inbox)>0
+               FROM messages m WHERE account_id=? AND gm_thrid=?
+              GROUP BY account_id, gm_thrid",
+        )?;
+        let mut out = Vec::new();
+        for (account_id, thrid) in keys {
+            let row = st
+                .query_row(params![account_id, thrid], |r| {
+                    Ok(ThreadRow {
+                        account_id: r.get(0)?,
+                        thrid: r.get(1)?,
+                        date: r.get(2)?,
+                        subject: r.get(3)?,
+                        snippet: r.get(4)?,
+                        senders: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                        count: r.get(6)?,
+                        unread: r.get(7)?,
+                        starred: r.get(8)?,
+                        has_attach: r.get(9)?,
+                        from_name: r.get(10)?,
+                        from_addr: r.get(11)?,
+                        in_inbox: r.get(12)?,
+                    })
+                })
+                .optional()?;
+            out.extend(row);
+        }
+        out.sort_by(|a, b| b.date.cmp(&a.date));
+        Ok(out)
     }
 }

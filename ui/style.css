@@ -106,6 +106,54 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 body.solo #divider { display: none; }
 body:not(.reading) #thread-bar { visibility: hidden; }
 
+/* ---- assistant ---- */
+#ask { display: grid; place-items: center; width: 34px; padding: 0; color: var(--accent); }
+#ask.on { background: var(--hover); }
+#assistant { flex: none; width: 380px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
+#assistant[hidden] { display: none; }
+#assistant > header { display: flex; align-items: center; gap: 2px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--line); height: 51px; }
+#assistant .title { flex: 1; font-weight: 600; }
+#assistant > header button { padding: 4px 8px; color: var(--muted); }
+#as-log { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+#as-log .hint { color: var(--muted); margin: auto 0; text-align: center; line-height: 1.7; }
+#as-log .hint b { display: block; color: var(--ink); margin-bottom: 4px; }
+.as-msg { max-width: 100%; overflow-wrap: anywhere; line-height: 1.5; }
+.as-msg.user { align-self: flex-end; max-width: 88%; background: var(--accent); color: #fff; padding: 7px 11px; border-radius: 12px 12px 3px 12px; white-space: pre-wrap; }
+@media (prefers-color-scheme: dark) { .as-msg.user { color: #111; } }
+.as-msg p { margin: 0 0 8px; }
+.as-msg p:last-child, .as-msg ul:last-child, .as-msg ol:last-child { margin-bottom: 0; }
+.as-msg ul, .as-msg ol { margin: 0 0 8px; padding-left: 20px; }
+.as-msg code { font: 12.5px ui-monospace, Consolas, monospace; background: var(--hover); padding: 1px 4px; border-radius: 3px; }
+.as-msg pre { margin: 0 0 8px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+              font: inherit; white-space: pre-wrap; }
+.as-did { color: var(--muted); font-size: 12.5px; display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.as-did span::before { content: "✓ "; color: var(--accent); }
+.as-status { color: var(--muted); font-size: 12.5px; display: flex; align-items: center; gap: 7px; }
+.as-status::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent);
+                     border-right-color: transparent; animation: spin .8s linear infinite; }
+.as-error { color: var(--danger); font-size: 13px; }
+#as-form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); align-items: flex-end; }
+#as-input { flex: 1; resize: none; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
+            border-radius: 8px; padding: 7px 10px; max-height: 160px; min-width: 0; }
+#as-setup { padding: 14px; border-top: 1px solid var(--line); }
+#as-setup[hidden] { display: none; }
+#as-setup p { margin: 0 0 10px; }
+#as-setup .note, #as-setup label { color: var(--muted); font-size: 13px; }
+#as-setup label { display: block; margin-bottom: 10px; }
+#as-setup input { display: block; width: 100%; margin-top: 4px; font: inherit; color: var(--ink); background: var(--panel);
+                  border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+#as-setup .row { display: flex; justify-content: flex-end; gap: 8px; }
+#as-setup-error { color: var(--danger); min-height: 1.3em; }
+body.solo #assistant, body.solo #ask { display: none; }
+/* a set of conversations the assistant put in the list */
+#set-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px;
+           background: var(--accent); color: #fff; font-size: 13px; }
+@media (prefers-color-scheme: dark) { #set-bar { color: #111; } }
+#set-bar .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+#set-bar button { background: none; border: 0; color: inherit; padding: 2px 6px; }
+#set-bar button:hover { background: rgba(255,255,255,.2); }
+.row-t .gone { font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+
 /* A conversation in a window of its own: nothing but the conversation. */
 body.solo #side, body.solo #top, body.solo #list, body.solo [data-act="window"] { display: none; }
 body.solo main { margin-left: 0; }
