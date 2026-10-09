@@ -891,10 +891,8 @@ function leaveConversation() {
 }
 
 function archive() {
-  const n = targets().length;
   act("archive");
   leaveConversation();
-  if (n) toast((n > 1 ? `${n} conversations archived.` : "Archived.") + " Press z to undo.");
 }
 
 function markUnread() {
@@ -1312,7 +1310,7 @@ function assistantActed({ op, items }) {
     }),
   };
   const what = { archive: "archived", read: "marked read", unread: "marked unread", star: "starred", unstar: "unstarred" }[op];
-  toast(`Assistant ${what} ${items.length} conversation${items.length > 1 ? "s" : ""}. Press z to undo.`);
+  toast(`Assistant ${what} ${items.length} conversation${items.length > 1 ? "s" : ""}.`);
   if (op === "archive") {
     for (const { t } of lastAction.items) { const v = state.views.get(key(t)); if (v) dropView(v); }
   }
