@@ -111,7 +111,7 @@ def mailbox(owner):
         text="来週土曜日のレッスンは14:05からです。", starred=True)
     add(4, 26, frm="Billing <billing@example.com>", subject="Your invoice for October", seen=True,
         html="<p>Your invoice is attached.</p>", attach=("invoice-2026-10.pdf", b"%PDF-1.4 fake invoice"),
-        extra=[("receipt.png", png(320, 200, (60, 140, 220)), ("image", "png")),
+        extra=[("receipt.png", png(3000, 4000, (60, 140, 220)), ("image", "png")),
                ("items.csv", b"item,qty,price\nwidget,2,19.99\n<script>alert(1)</script>,1,0\n", ("text", "csv")),
                ("archive.zip", b"PK\x03\x04 not really", ("application", "zip"))])
     for i in range(70):
