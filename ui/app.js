@@ -527,7 +527,7 @@ function renderMessage(v, m, open) {
   if (un) to.append(" · ", un);
   who.append(top, to, el("div", "meta", m.snippet));
   head.append(avatar(m.from_name, m.from_addr, "big"), who);
-  head.onclick = () => { node.classList.toggle("closed"); if (!node.classList.contains("closed")) fill(node, m); };
+  head.onclick = () => { node.classList.toggle("closed"); if (!node.classList.contains("closed")) fill(node, m); updateThreadBar(); };
   node.append(head);
   // Say it in words when something is wrong; a small icon is too easy to miss.
   const problems = [];
@@ -983,7 +983,7 @@ function focusMessage(i, scroll = true) {
   for (let n = 0; n < nodes.length; n++) nodes[n].classList.toggle("focus", scroll && n === v.focus && nodes.length > 1);
   const node = nodes[v.focus];
   if (!node) return;
-  if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); }
+  if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); updateThreadBar(); }
   if (v.focus === 0) { if (scroll) v.node.scrollTo({ top: 0, behavior: "smooth" }); }
   else node.scrollIntoView({ block: "start", behavior: scroll ? "smooth" : "auto" });
 }
@@ -991,6 +991,24 @@ function focusMessage(i, scroll = true) {
 function updateThreadBar() {
   const starred = state.open?.messages.some(m => m.starred);
   $('#thread-bar [data-act="star"]').textContent = starred ? "★ Starred" : "Star";
+  // one button opens every message, or closes them again once all are open
+  const b = $('#thread-bar [data-act="expand"]'), nodes = [...(state.open?.node.querySelectorAll(".msg") || [])];
+  const allOpen = nodes.every(n => !n.classList.contains("closed"));
+  b.hidden = nodes.length < 2;
+  b.textContent = allOpen ? "Collapse all" : "Expand all";
+  b.title = allOpen ? "Close every message but the last (:)" : "Open every message in this conversation (;)";
+}
+
+/** Open every message of the conversation on screen, or close all but the last. */
+function expandAll(open = [...state.open?.node.querySelectorAll(".msg") || []].some(n => n.classList.contains("closed"))) {
+  const v = state.open;
+  if (!v) return;
+  const nodes = [...v.node.querySelectorAll(".msg")];
+  nodes.forEach((n, i) => {
+    n.classList.toggle("closed", !open && i < nodes.length - 1);
+    if (!n.classList.contains("closed")) fill(n, v.messages[i]);
+  });
+  updateThreadBar();
 }
 
 function openInWindow(t = state.open || state.threads[state.cursor]) {
@@ -1154,6 +1172,7 @@ $("#thread-bar").addEventListener("click", e => {
   if (a === "archive") archive();
   if (a === "unread") markUnread();
   if (a === "star") toggleStar();
+  if (a === "expand") expandAll();
   if (a === "reply") replyInGmail();
   if (a === "window") openInWindow();
 });
@@ -1244,7 +1263,7 @@ function onKey(e) {
   if (SOLO) {
     // One conversation, no list: only the keys that make sense here.
     const solo = { n: () => focusMessage(state.open.focus + 1), p: () => focusMessage(state.open.focus - 1),
-      e: archive, s: toggleStar, U: markUnread, r: replyInGmail, Escape: closeWindow, u: closeWindow,
+      e: archive, s: toggleStar, U: markUnread, ";": () => expandAll(true), ":": () => expandAll(false), r: replyInGmail, Escape: closeWindow, u: closeWindow,
       "?": () => $("#help-dialog").showModal() }[k];
     if (solo && state.open) { solo(); e.preventDefault(); }
     return;
@@ -1269,6 +1288,8 @@ function onKey(e) {
     case "n": if (state.open) focusMessage(state.open.focus + 1); break;
     case "p": if (state.open) focusMessage(state.open.focus - 1); break;
     case "e": archive(); break;
+    case ";": expandAll(true); break;
+    case ":": expandAll(false); break;
     case "s": toggleStar(); break;
     case "z": undo(); break;
     case "I": act("read"); break;
