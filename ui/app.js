@@ -28,6 +28,18 @@ const state = {
   open: null,            // the view on screen
 };
 const key = t => t.account_id + ":" + t.thrid;
+
+// Small icons are drawn rather than typed: a text glyph looks however the font happens to
+// draw it (the "more" ellipsis came out as three dashes).
+const ICONS = {
+  more: '<circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/>',
+  save: '<path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+function icon(name) {
+  const t = document.createElement("template");
+  t.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">${ICONS[name]}</svg>`;
+  return t.content.firstChild;
+}
 const account = id => state.accounts.find(a => a.id === id);
 const dark = matchMedia("(prefers-color-scheme: dark)");
 /** Set when this window shows a single conversation: "account:thread". */
@@ -362,7 +374,8 @@ function renderMessage(v, m, open) {
   // Second line: who it went to when open, a preview of the text when collapsed.
   // The date shares the sender's line, so the two sit on one baseline.
   const top = el("div", "top");
-  const more = el("button", "more", "⋯");
+  const more = el("button", "more");
+  more.append(icon("more"));
   more.title = "View as plain text, or see the original message";
   more.onclick = e => { e.stopPropagation(); messageMenu(more, node, m); };
   top.append(from, el("span", "when", fmtDate(m.date, true)), more);
@@ -468,7 +481,8 @@ function fill(node, m) {
         thumb.src = attachmentUrl(m, a) + "/preview";
         chip.append(thumb);
       }
-      const dl = el("button", "dl", "⭳");
+      const dl = el("button", "dl");
+      dl.append(icon("save"));
       dl.title = "Save to Downloads";
       dl.onclick = e => { e.stopPropagation(); saveAttachment(m, a); };
       chip.append(el("span", "fn", (a.kind === "image" ? "" : "📎 ") + a.name), el("span", "sz", fmtSize(a.size)), dl);
