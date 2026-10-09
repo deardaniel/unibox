@@ -38,11 +38,12 @@ kbd { font: 12px/1 ui-monospace, Consolas, monospace; border: 1px solid var(--li
         background: var(--bg); border-right: 1px solid var(--line); white-space: nowrap;
         transition: width .12s ease, box-shadow .12s ease; }
 #side:hover, #side:focus-within { width: 250px; box-shadow: 6px 0 24px rgba(0,0,0,.18); transition-delay: .12s; }
-#side .label, #side .name, #side .rm { display: none; }
+#side .label, #side .name, #side .rm, #side .pw { display: none; }
 #side:hover .label, #side:hover .name,
 #side:focus-within .label, #side:focus-within .name { display: revert; }
 /* The remove button only takes up room on the row being pointed at, so the counts line up. */
 #side .acct:hover .rm { display: revert; }
+#side .acct:hover .pw { display: grid; }
 #brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; padding: 2px 6px 12px; }
 #brand .logo { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; flex: none;
                display: grid; place-items: center; font-size: 15px; }
@@ -59,6 +60,10 @@ kbd { font: 12px/1 ui-monospace, Consolas, monospace; border: 1px solid var(--li
 #side:hover .acct .n, #side:focus-within .acct .n { order: 3; font-size: inherit; }
 .acct .rm { color: var(--muted); padding: 0 2px; order: 4; }
 .acct .rm:hover { color: var(--danger); }
+.acct .pw { color: var(--muted); order: 4; place-items: center; }
+.acct .pw svg { width: 14px; height: 14px; }
+.acct .pw:hover { color: var(--ink); }
+dialog input[readonly] { color: var(--muted); }
 .acct.err .name { color: var(--danger); }
 .acct.err .dot { outline: 2px solid var(--danger); outline-offset: 1px; }
 #add { color: var(--muted); margin-top: 6px; }

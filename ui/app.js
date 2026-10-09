@@ -34,6 +34,7 @@ const key = t => t.account_id + ":" + t.thrid;
 // draw it (the "more" ellipsis came out as three dashes).
 const ICONS = {
   more: '<circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/>',
+  key: '<circle cx="5" cy="11" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 9l6-6M10.5 5.5l2 2M12.6 3.4l1.2 1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
   save: '<path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function icon(name) {
@@ -156,7 +157,11 @@ function renderAccounts() {
       const rm = el("span", "rm", "×");
       rm.title = "Remove this account from Unibox";
       rm.onclick = e => { e.stopPropagation(); removeAccount(acct); };
-      b.append(rm);
+      const pw = el("span", "pw");
+      pw.append(icon("key"));
+      pw.title = "Change the app password";
+      pw.onclick = e => { e.stopPropagation(); openAccountDialog(acct); };
+      b.append(pw, rm);
     }
     b.onclick = () => { if (b.dataset.dragged) return delete b.dataset.dragged; setFilter(id); b.blur(); };
     if (acct) { b.dataset.id = id; b.onpointerdown = e => dragAccount(e, b); }
@@ -174,7 +179,7 @@ function renderAccounts() {
 // Drag an account up or down the sidebar to reorder it. The rows move as you drag; the order
 // is saved on release (it also decides which account the 1-9 keys pick).
 function dragAccount(down, b) {
-  if (down.button !== 0 || down.target.closest(".rm")) return;
+  if (down.button !== 0 || down.target.closest(".rm, .pw")) return;
   const nav = $("#accounts");
   let dragging = false;
   const move = e => {
@@ -961,7 +966,20 @@ function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
 $("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
 $("#help").onclick = () => $("#help-dialog").showModal();
-$("#add").onclick = () => { $("#add").blur(); $("#add-error").textContent = ""; $("#add-dialog").showModal(); };
+// The same dialog adds an account or, given one, replaces its saved app password.
+function openAccountDialog(acct) {
+  const form = $("#add-form");
+  form.reset();
+  form.dataset.change = acct ? acct.email : "";
+  form.email.value = acct ? acct.email : "";
+  form.email.readOnly = !!acct;
+  $("#add-title").textContent = acct ? "Change app password" : "Add a Gmail account";
+  $("#add-submit").textContent = acct ? "Save password" : "Add account";
+  $("#add-error").textContent = "";
+  $("#add-dialog").showModal();
+  if (acct) form.password.focus();
+}
+$("#add").onclick = () => { $("#add").blur(); openAccountDialog(); };
 $("#add-cancel").onclick = () => $("#add-dialog").close();
 document.addEventListener("click", e => {
   const a = e.target.closest?.("a[data-external]");
@@ -978,7 +996,7 @@ $("#add-form").addEventListener("submit", async e => {
     await api("/api/accounts", { body: { email: form.email.value, password: form.password.value } });
     form.reset();
     $("#add-dialog").close();
-    toast("Account added. Fetching the inbox…");
+    toast(form.dataset.change ? "App password changed. Syncing…" : "Account added. Fetching the inbox…");
     refresh();
   } catch (err) {
     $("#add-error").textContent = /login failed/i.test(err.message)
@@ -986,7 +1004,7 @@ $("#add-form").addEventListener("submit", async e => {
       : err.message;
   }
   btn.disabled = false;
-  btn.textContent = "Add account";
+  btn.textContent = form.dataset.change ? "Save password" : "Add account";
 });
 
 // ---- assistant ---------------------------------------------------------------
@@ -1230,7 +1248,7 @@ function listen() {
   api("/api/sync").then(setSync).catch(() => {});
   if (store.get("assistant") === "open") toggleAssistant(false);
   $("#list").focus();
-  if (!state.accounts.length) $("#add-dialog").showModal();
+  if (!state.accounts.length) openAccountDialog();
   // Have the top of the inbox rendered before it is asked for.
   state.threads.slice(0, 2).forEach(t => ensureView(t));
 })();
