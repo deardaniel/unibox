@@ -187,6 +187,13 @@ def mailbox(owner):
         <div itemprop="potentialAction" itemscope itemtype="http://schema.org/ViewAction">
         <link itemprop="target" href="https://air.example/trips/K7QF2M"/><meta itemprop="name" content="View trip"/></div></div>
         <p>Thanks for booking with Example Air. Your confirmation code is <b>K7QF2M</b>.</p>""")
+    # A receipt laid out as a table: the price column must not be squeezed to one character.
+    add(10, 9, frm="Castle Hire <receipts@pay.example>", subject="Your receipt [#1267-1958]", seen=True, html="""
+        <table width="600" align="center"><tr><td style="padding:24px;background:#f6f9fc">
+        <table width="100%"><tr><td style="font-size:16px;line-height:24px">Booking Online Payment for #13030: Castle Hire - Asset
+        Booking 13030 - Payment for the afternoon of the party, including delivery and collection</td>
+        <td width="8"></td><td align="right" valign="top" style="font-size:16px" id="price">&euro;185.00</td></tr></table>
+        </td></tr></table>""")
     for i in range(70):
         add(100 + i, 30 + i * 7, frm=f"Sender {i} <sender{i}@example.com>", subject=f"Routine message number {i}",
             text=f"This is the body of routine message {i}. " * 4, seen=i % 3 != 0)

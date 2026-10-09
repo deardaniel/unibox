@@ -261,7 +261,7 @@ html:root,html:root>body{height:auto!important;min-height:0!important;max-height
 html:root{overflow-x:auto!important;overflow-y:hidden!important}
 body{margin:0!important;padding:12px 14px!important;box-sizing:border-box!important;background:#fff;color:#111;
      font:15px/1.5 'Segoe UI','Yu Gothic UI','Meiryo',-apple-system,BlinkMacSystemFont,sans-serif;
-     -webkit-text-size-adjust:100%;overflow-wrap:anywhere}
+     -webkit-text-size-adjust:100%;overflow-wrap:break-word}
 img:not([width]):not([height]){max-width:100%;height:auto}
 pre{white-space:pre-wrap}
 blockquote{margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex}
@@ -405,6 +405,14 @@ Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
         // the message's rule survives sanitising, so ours has to be the more specific one
         assert!(html.contains("height: 100% !important"));
         assert!(html.contains("html:root,html:root>body{height:auto!important"));
+    }
+
+    #[test]
+    fn long_words_wrap_without_squeezing_table_columns() {
+        // "anywhere" lets a table shrink a column to one character wide (a price came out as
+        // a vertical strip beside a long description); "break-word" wraps without doing that
+        assert!(FRAME_CSS.contains("overflow-wrap:break-word"));
+        assert!(!FRAME_CSS.contains("overflow-wrap:anywhere"));
     }
 
     #[test]
