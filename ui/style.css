@@ -152,12 +152,13 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .msg { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
 .msg > header { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px 10px; cursor: pointer; }
 .msg .who { flex: 1; min-width: 0; line-height: 1.35; }
-.msg .from { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg .top { display: flex; align-items: baseline; gap: 12px; }
+.msg .from { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg .addr { color: var(--muted); font-weight: 400; font-size: 12.5px; }
 .msg .to, .msg .meta { color: var(--muted); font-size: 12.5px; }
 .msg .to { overflow-wrap: anywhere; }
 .msg .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msg .when { color: var(--muted); font-size: 12.5px; white-space: nowrap; padding-top: 1px; }
+.msg .when { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
 .msg.focus { border-color: var(--cursor); }
 .msg.closed .to, .msg.closed .content, .msg:not(.closed) .meta { display: none; }
 .msg:not(.closed) > header { border-bottom: 1px solid var(--line); }

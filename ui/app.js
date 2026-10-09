@@ -366,9 +366,12 @@ function renderMessage(v, m, open) {
   const from = el("div", "from", m.from_name || m.from_addr || "(unknown)");
   if (m.from_name) from.append(el("span", "addr", "  " + m.from_addr));
   // Second line: who it went to when open, a preview of the text when collapsed.
+  // The date shares the sender's line, so the two sit on one baseline.
+  const top = el("div", "top");
+  top.append(from, el("span", "when", fmtDate(m.date, true)));
   const who = el("div", "who");
-  who.append(from, el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", ")), el("div", "meta", m.snippet));
-  head.append(avatar(m.from_name, m.from_addr, "big"), who, el("span", "when", fmtDate(m.date, true)));
+  who.append(top, el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", ")), el("div", "meta", m.snippet));
+  head.append(avatar(m.from_name, m.from_addr, "big"), who);
   head.onclick = () => { node.classList.toggle("closed"); if (!node.classList.contains("closed")) fill(node, m); };
   node.append(head, el("div", "content"));
   if (open) fill(node, m);
