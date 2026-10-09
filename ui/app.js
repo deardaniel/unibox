@@ -22,6 +22,7 @@ const state = {
   q: "",
   threads: [],
   more: true,
+  count: null,           // { total, unread } for the whole list, not just the rows loaded so far
   cursor: 0,
   selected: new Set(),   // thread keys
   views: new Map(),      // thread key -> rendered conversation, oldest first
@@ -301,6 +302,32 @@ async function loadThreads(reset) {
   state.threads = reset ? applyOverrides(rows) : state.threads.concat(applyOverrides(rows));
   state.more = rows.length === 60;
   renderList();
+  if (reset) countList();
+}
+
+/** Ask how long the whole list is; only the first pages of it are ever loaded. */
+async function countList() {
+  const asked = listParams(0).toString();
+  const count = await api("/api/threads/count?" + asked).catch(() => null);
+  if (asked !== listParams(0).toString()) return;   // the list has changed since; a newer answer is coming
+  state.count = count;
+  renderListFoot();
+}
+
+/** The strip under the list: what it is showing and how much of it there is. */
+function renderListFoot() {
+  let foot = $("#list-foot");
+  if (!foot) { foot = el("div"); foot.id = "list-foot"; }
+  $("#list").append(foot);
+  const c = state.count, n = x => x.toLocaleString();
+  const what = state.collection ? state.collection.title
+    : (state.q ? `Search in ${state.filter == null ? "all inboxes" : account(state.filter)?.email}`
+      : state.filter == null ? "All inboxes" : account(state.filter)?.email || "Inbox")
+      + (state.peopleOnly ? ", people only" : "") + (state.unreadOnly ? ", unread only" : "");
+  foot.textContent = "";
+  foot.append(el("span", "what", what));
+  if (c) foot.append(el("span", "n", `${n(c.total)} conversation${c.total === 1 ? "" : "s"}` + (c.unread && !state.unreadOnly ? ` · ${n(c.unread)} unread` : "")));
+  if (state.selected.size) foot.append(el("span", "sel", `${n(state.selected.size)} selected`));
 }
 
 let hoverTimer;
@@ -325,6 +352,7 @@ function renderList() {
         : state.peopleOnly ? (state.q ? "Nothing from people matches that search." : "Nothing from people in the inbox.")
         : state.q ? "Nothing in the inbox matches that search."
         : state.accounts.some(a => !a.last_sync) ? "Fetching your inbox…" : "Inbox zero."));
+    renderListFoot();
     return;
   }
   state.threads.forEach((t, i) => {
@@ -362,6 +390,7 @@ function renderList() {
     row.onmouseleave = () => clearTimeout(hoverTimer);
     list.append(row);
   });
+  renderListFoot();
   list.scrollTop = top;
 }
 
@@ -1117,6 +1146,8 @@ function act(op, list = targets(), { record = true } = {}) {
       unread: op === "read" ? 0 : op === "unread" ? 1 : undefined,
       starred: op === "star" ? true : op === "unstar" ? false : undefined });
     if (op === "archive") {
+      // keep the count under the list in step until the server's own figure arrives
+      if (state.count && row) { state.count.total--; if (row.unread) state.count.unread--; }
       state.threads = state.threads.filter(x => key(x) !== k);
       const v = state.views.get(k);
       if (v) dropView(v);
@@ -1618,6 +1649,7 @@ async function refresh() {
   renderAccounts();
   // Re-read as many rows as are on screen, so paging and the cursor survive a refresh.
   const want = Math.max(60, state.threads.length);
+  countList().catch(() => {});
   let rows = [], page;
   do {
     page = await api("/api/threads?" + listParams(rows.length));

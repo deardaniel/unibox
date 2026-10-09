@@ -178,6 +178,21 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
     ))
 }
 
+/// The size of the list `list_threads` pages through: { total, unread }.
+async fn count_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>) -> Api<Json<serde_json::Value>> {
+    let (total, unread) = blocking(move || {
+        if q.collection {
+            let keys = app.agent.collection.lock().unwrap().as_ref().map(|c| c.keys.clone()).unwrap_or_default();
+            let rows = app.db.threads_by_keys(&keys)?;
+            return Ok((rows.len() as i64, rows.iter().filter(|t| t.unread > 0).count() as i64));
+        }
+        let keep: Vec<&str> = q.keep.split(',').filter(|k| !k.is_empty()).collect();
+        app.db.thread_count(q.account, q.q.trim(), q.unread, q.people, &serde_json::to_string(&keep)?)
+    })
+    .await?;
+    Ok(Json(serde_json::json!({ "total": total, "unread": unread })))
+}
+
 // ---- the assistant ---------------------------------------------------------
 async fn agent_view(State(app): State<Arc<App>>) -> Api<Json<serde_json::Value>> {
     Ok(Json(blocking(move || app.agent_view()).await?))
@@ -575,6 +590,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/accounts/order", post(order_accounts))
         .route("/api/accounts/:id", delete(remove_account))
         .route("/api/threads", get(list_threads))
+        .route("/api/threads/count", get(count_threads))
         .route("/api/thread/:account/:thrid", get(get_thread))
         .route("/api/thread/:account/:thrid/action", post(thread_action))
         .route("/api/message/:id/html", get(message_html))
