@@ -1,6 +1,6 @@
 //! Turning raw RFC 822 messages into things the UI can show safely.
 
-use mail_parser::{Address, MessageParser, MimeHeaders};
+use mail_parser::{Address, MessageParser, MimeHeaders, PartType};
 use regex::Regex;
 use serde::Serialize;
 use std::sync::OnceLock;
@@ -180,7 +180,7 @@ fn sanitize(html: &str) -> String {
 const FRAME_CSS: &str = "
 html,body{height:auto!important;min-height:0!important}
 html{overflow-x:auto!important;overflow-y:hidden!important}
-body{margin:0!important;padding:12px 16px!important;background:#fff;color:#111;
+body{margin:0!important;padding:12px 14px!important;background:#fff;color:#111;
      font:15px/1.5 'Segoe UI','Yu Gothic UI','Meiryo',-apple-system,BlinkMacSystemFont,sans-serif;
      -webkit-text-size-adjust:100%;overflow-wrap:anywhere}
 img{max-width:100%!important;height:auto!important}
@@ -189,6 +189,75 @@ pre{white-space:pre-wrap}
 blockquote{margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex}
 html.dk img:not([data-keep]){filter:invert(1) hue-rotate(180deg)}
 ";
+
+fn frame(body: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><base target=\"_blank\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <style>{FRAME_CSS}</style></head><body>{body}</body></html>"
+    )
+}
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Which alternative versions of the body a message carries.
+#[derive(Serialize)]
+pub struct Parts {
+    pub html: bool,
+    pub text: bool,
+}
+
+pub fn parts(raw: &[u8]) -> Parts {
+    let Some(msg) = MessageParser::default().parse(raw) else { return Parts { html: false, text: false } };
+    Parts {
+        html: msg.html_body.iter().any(|&i| matches!(msg.parts.get(i).map(|p| &p.body), Some(PartType::Html(_)))),
+        text: msg.text_body.iter().any(|&i| matches!(msg.parts.get(i).map(|p| &p.body), Some(PartType::Text(_)))),
+    }
+}
+
+/// The plain-text version of a message, as a document for the message frame.
+pub fn render_text(raw: &[u8]) -> String {
+    static LINK: OnceLock<Regex> = OnceLock::new();
+    let msg = MessageParser::default().parse(raw);
+    let text = msg.as_ref().and_then(|m| {
+        m.text_body.iter().find_map(|&i| match m.parts.get(i).map(|p| &p.body) {
+            Some(PartType::Text(t)) => Some(t.to_string()),
+            _ => None,
+        })
+    });
+    let Some(text) = text else { return frame("<p><i>This message has no plain-text version.</i></p>") };
+    // Everything is escaped; web addresses additionally become links.
+    let text = text.trim();
+    let mut linked = String::new();
+    let mut last = 0;
+    for m in re(&LINK, r#"https?://[^\s<>"]+[^\s<>".,;:!?)\]]"#).find_iter(text) {
+        let url = escape(m.as_str());
+        linked.push_str(&escape(&text[last..m.start()]));
+        linked.push_str(&format!("<a href=\"{url}\">{url}</a>"));
+        last = m.end();
+    }
+    linked.push_str(&escape(&text[last..]));
+    frame(&format!("<pre style=\"font:inherit;margin:0\">{linked}</pre>"))
+}
+
+/// The message exactly as it arrived (headers, then every part still encoded), for
+/// looking under the hood. Long messages are cut off so the frame stays usable.
+pub fn render_source(raw: &[u8]) -> String {
+    const LIMIT: usize = 400_000;
+    let shown = String::from_utf8_lossy(&raw[..raw.len().min(LIMIT)]);
+    let note = if raw.len() > LIMIT {
+        format!("\n\n[… cut off here: the whole message is {} bytes]", raw.len())
+    } else {
+        String::new()
+    };
+    frame(&format!(
+        "<pre style=\"font:12.5px/1.45 ui-monospace,Consolas,monospace;margin:0\">{}{}</pre>",
+        escape(&shown),
+        escape(&note)
+    ))
+}
 
 /// The complete document shown in the message frame.
 pub fn render_html(raw: &[u8], message_id: i64) -> String {
@@ -200,11 +269,7 @@ pub fn render_html(raw: &[u8], message_id: i64) -> String {
     let body = sanitize(&strip_tracking_pixels(&body));
     let body = re(&CID, r#"(?i)(["'(=\s])cid:([^"'()\s>]+)"#)
         .replace_all(&body, |c: &regex::Captures| format!("{}/api/message/{}/cid/{}", &c[1], message_id, &c[2]));
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><base target=\"_blank\">\
-         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <style>{FRAME_CSS}</style></head><body>{body}</body></html>"
-    )
+    frame(&body)
 }
 
 #[cfg(test)]
@@ -222,6 +287,23 @@ Content-Type: multipart/mixed; boundary=b1\r\n\r\n\
 Content-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n\
 --b1\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\n\
 Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b1--\r\n";
+
+    #[test]
+    fn alternative_views() {
+        let msg = b"From: a@b.c\r\nSubject: s\r\nMIME-Version: 1.0\r\n\
+Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
+--b1\r\nContent-Type: text/plain\r\n\r\nSee <b> https://example.com/a?x=1&y=2.\r\n\
+--b1\r\nContent-Type: text/html\r\n\r\n<p>See <b>it</b></p>\r\n--b1--\r\n";
+        let p = parts(msg);
+        assert!(p.html && p.text);
+        let p = parts(MSG);
+        assert!(p.html && !p.text, "an HTML-only message has no plain-text version");
+        let text = render_text(msg);
+        assert!(text.contains("See &lt;b&gt; <a href=\"https://example.com/a?x=1&amp;y=2\">"), "{text}");
+        assert!(text.contains("</a>."), "the full stop is not part of the link");
+        let source = render_source(msg);
+        assert!(source.contains("Content-Type: multipart/alternative") && source.contains("&lt;p&gt;See"));
+    }
 
     #[test]
     fn headers_decode() {

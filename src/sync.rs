@@ -78,7 +78,7 @@ impl App {
     /// What the sync button shows: whether a pass is running and when the next one is due.
     pub fn sync_status(&self) -> serde_json::Value {
         let (syncing, next) = *self.status.lock().unwrap();
-        serde_json::json!({ "syncing": syncing, "next": next })
+        serde_json::json!({ "syncing": syncing, "next": next, "every": SYNC_EVERY.as_secs() })
     }
 
     fn set_status(&self, syncing: bool, next: i64) {

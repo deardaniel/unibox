@@ -134,9 +134,9 @@ function renderAccounts() {
   const nav = $("#accounts");
   nav.textContent = "";
   const item = (id, name, color, unread, acct) => {
-    const b = el("button", "acct" + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : ""));
+    const b = el("button", "acct" + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : "") + (unread ? "" : " zero"));
+    b.style.setProperty("--c", color);
     const dot = el("span", "dot");
-    dot.style.background = color;
     b.append(dot, el("span", "n", unread || ""), el("span", "name", name));
     b.title = acct ? (acct.last_error ? `${acct.email}: sync problem: ${acct.last_error}` : acct.email) : "All inboxes";
     if (acct) {
@@ -148,7 +148,7 @@ function renderAccounts() {
     b.onclick = () => { setFilter(id); b.blur(); };
     nav.append(b);
   };
-  item(null, "All inboxes", "var(--muted)", state.accounts.reduce((n, a) => n + a.unread, 0));
+  item(null, "All inboxes", "#77736b", state.accounts.reduce((n, a) => n + a.unread, 0));
   for (const a of state.accounts) item(a.id, a.email, a.color, a.unread, a);
 
   const errs = state.accounts.filter(a => a.last_error);
@@ -214,7 +214,9 @@ function renderList() {
     const marks = el("span", "marks");
     if (t.has_attach) marks.append("📎");
     if (t.starred) marks.append(el("span", "star", "★"));
-    row.append(el("span", "bar"), av, who, text, marks, el("span", "date", fmtDate(t.date)));
+    const date = el("span", "date");
+    date.append(el("span", "d", fmtDate(t.date)));
+    row.append(el("span", "bar"), av, who, text, marks, date);
     row.onclick = e => {
       if (e.ctrlKey || e.metaKey) return openInWindow(t);
       setCursor(i);
@@ -368,7 +370,10 @@ function renderMessage(v, m, open) {
   // Second line: who it went to when open, a preview of the text when collapsed.
   // The date shares the sender's line, so the two sit on one baseline.
   const top = el("div", "top");
-  top.append(from, el("span", "when", fmtDate(m.date, true)));
+  const more = el("button", "more", "⋯");
+  more.title = "View as plain text, or see the original message";
+  more.onclick = e => { e.stopPropagation(); messageMenu(more, node, m); };
+  top.append(from, el("span", "when", fmtDate(m.date, true)), more);
   const who = el("div", "who");
   who.append(top, el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", ")), el("div", "meta", m.snippet));
   head.append(avatar(m.from_name, m.from_addr, "big"), who);
@@ -376,6 +381,36 @@ function renderMessage(v, m, open) {
   node.append(head, el("div", "content"));
   if (open) fill(node, m);
   return node;
+}
+
+/** A message's alternative views. Most mail carries both a formatted and a plain-text version. */
+async function messageMenu(anchor, node, m) {
+  document.querySelector(".menu")?.remove();
+  const menu = el("div", "menu");
+  const current = node.dataset.view || "html";
+  const parts = m.has_body ? await api(`/api/message/${m.id}/parts`).catch(() => null) : null;
+  const item = (view, label, available) => {
+    const b = el("button", current === view ? "on" : "", label);
+    b.disabled = !available;
+    if (!available) b.title = "This message doesn't include one";
+    b.onclick = () => { menu.remove(); setMessageView(node, m, view); };
+    menu.append(b);
+  };
+  item("html", "Formatted", !!parts);
+  item("text", "Plain text", !!parts?.text);
+  item("source", "Original message", !!parts);
+  document.body.append(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = r.bottom + 4 + "px";
+  menu.style.left = Math.max(8, r.right - menu.offsetWidth) + "px";
+  const close = e => { if (!menu.contains(e.target)) { menu.remove(); removeEventListener("pointerdown", close, true); } };
+  addEventListener("pointerdown", close, true);
+}
+
+function setMessageView(node, m, view) {
+  node.dataset.view = view;
+  node.querySelector(".content").textContent = "";
+  fill(node, m);
 }
 
 function fill(node, m) {
@@ -413,7 +448,8 @@ function fill(node, m) {
     // Keyboard shortcuts keep working after clicking inside a message.
     doc.addEventListener("keydown", e => onKey(e));
   });
-  f.src = `/api/message/${m.id}/html?v=${BUILD}`;
+  const view = node.dataset.view || "html";
+  f.src = `/api/message/${m.id}/html?v=${BUILD}` + (view === "html" ? "" : "&view=" + view);
   content.append(f);
   if (m.attachments.length) {
     const files = el("div", "files");
@@ -638,15 +674,19 @@ $("#search").addEventListener("keydown", e => { if (e.key === "Enter") { e.targe
 
 // ---- toolbar and dialogs -------------------------------------------------------
 // The sync button says what the background sync is doing: working, or counting down to the next check.
-const sync = { syncing: true, next: 0 };
+const sync = { syncing: true, next: 0, every: 120 };
 function renderSync() {
-  const left = Math.max(0, sync.next - Math.floor(Date.now() / 1000));
+  const left = Math.max(0, sync.next - Date.now() / 1000);
   // a countdown that has run out means the next pass is about to start
   const busy = sync.syncing || left === 0;
   const b = $("#sync");
   b.classList.toggle("busy", busy);
-  b.querySelector(".what").textContent = busy ? "Syncing…" : `Sync in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-  b.title = busy ? "Checking Gmail for new mail and changes" : "Waiting for the next automatic check. Click to check now.";
+  b.querySelector(".what").textContent = busy ? "Syncing…" : "Sync";
+  // The border fills as the wait runs down; while syncing it is empty and the arrow spins.
+  b.style.setProperty("--p", busy ? 0 : Math.min(1, 1 - (left - 1) / sync.every));
+  const s = Math.ceil(left);
+  b.title = busy ? "Checking Gmail for new mail and changes"
+    : `Next automatic check in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}. Click to check now.`;
 }
 function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);

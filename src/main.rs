@@ -66,7 +66,7 @@ fn asset(name: &str, built_in: &'static str) -> String {
 }
 
 /// Bump when the way messages are rendered changes, so cached copies in the window are dropped.
-const RENDER_VERSION: &str = "4";
+const RENDER_VERSION: &str = "6";
 
 async fn index() -> impl IntoResponse {
     let html = asset("index.html", include_str!("../ui/index.html")).replace("__BUILD__", RENDER_VERSION);
@@ -189,10 +189,33 @@ fn untrusted(mime: &str) -> [(header::HeaderName, HeaderValue); 4] {
     ]
 }
 
-async fn message_html(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<Response> {
-    let html = blocking(move || Ok(app.db.raw_body(id)?.map(|raw| mime::render_html(&raw, id)))).await?;
+#[derive(Deserialize)]
+struct ViewOptions {
+    /// "text" for the plain-text version, "source" for the raw message; otherwise the formatted one.
+    #[serde(default)]
+    view: String,
+}
+
+async fn message_html(
+    State(app): State<Arc<App>>,
+    Path(id): Path<i64>,
+    Query(options): Query<ViewOptions>,
+) -> Api<Response> {
+    let html = blocking(move || {
+        Ok(app.db.raw_body(id)?.map(|raw| match options.view.as_str() {
+            "text" => mime::render_text(&raw),
+            "source" => mime::render_source(&raw),
+            _ => mime::render_html(&raw, id),
+        }))
+    })
+    .await?;
     let html = html.ok_or_else(not_found)?;
     Ok((untrusted("text/html; charset=utf-8"), html).into_response())
+}
+
+async fn message_parts(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<Json<mime::Parts>> {
+    let parts = blocking(move || Ok(app.db.raw_body(id)?.map(|raw| mime::parts(&raw)))).await?;
+    Ok(Json(parts.ok_or_else(not_found)?))
 }
 
 async fn message_cid(State(app): State<Arc<App>>, Path((id, cid)): Path<(i64, String)>) -> Api<Response> {
@@ -369,6 +392,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/thread/:account/:thrid", get(get_thread))
         .route("/api/thread/:account/:thrid/action", post(thread_action))
         .route("/api/message/:id/html", get(message_html))
+        .route("/api/message/:id/parts", get(message_parts))
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/sync", get(sync_status).post(sync_now))
