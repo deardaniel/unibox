@@ -593,8 +593,14 @@ async function messageMenu(anchor, node, m) {
   const r = anchor.getBoundingClientRect();
   menu.style.top = r.bottom + 4 + "px";
   menu.style.left = Math.max(8, r.right - menu.offsetWidth) + "px";
-  const close = e => { if (!menu.contains(e.target)) { menu.remove(); removeEventListener("pointerdown", close, true); } };
+  // Close on a click anywhere else. A click inside a message body lands in its frame and never
+  // reaches this page; what the page does see is itself losing focus to the frame.
+  const done = () => { menu.remove(); removeEventListener("pointerdown", close, true); removeEventListener("blur", done); removeEventListener("keydown", esc, true); };
+  const close = e => { if (!menu.contains(e.target)) done(); };
+  const esc = e => { if (e.key === "Escape") { e.stopPropagation(); done(); } };
   addEventListener("pointerdown", close, true);
+  addEventListener("blur", done);
+  addEventListener("keydown", esc, true);
 }
 
 /** Whose verdict the badge shows. A Google Group that puts its own name in the From line is
