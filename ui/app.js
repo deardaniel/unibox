@@ -21,8 +21,6 @@ const state = {
   filter: null,          // account id, or null for all inboxes
   q: "",
   threads: [],
-  more: true,
-  count: null,           // { total, unread } for the whole list, not just the rows loaded so far
   cursor: 0,
   selected: new Set(),   // thread keys
   views: new Map(),      // thread key -> rendered conversation, oldest first
@@ -260,9 +258,9 @@ function setFilter(id) {
 
 // ---- conversation list -------------------------------------------------------
 /** What to ask the server for: the inbox (filtered, searched), or the assistant's set. */
-function listParams(offset) {
-  if (state.collection) return new URLSearchParams({ collection: true, offset });
-  const p = new URLSearchParams({ q: state.q, offset });
+function listParams() {
+  if (state.collection) return new URLSearchParams({ collection: true });
+  const p = new URLSearchParams({ q: state.q });
   if (state.filter != null) p.set("account", state.filter);
   if (state.unreadOnly) { p.set("unread", true); p.set("keep", [...state.kept].join(",")); }
   if (state.peopleOnly) p.set("people", true);
@@ -296,22 +294,13 @@ function leaveCollection() {
   api("/api/agent/collection/clear", { method: "POST" }).catch(() => {});
 }
 
-async function loadThreads(reset) {
-  const offset = reset ? 0 : state.threads.length;
-  const rows = await api("/api/threads?" + listParams(offset));
-  state.threads = reset ? applyOverrides(rows) : state.threads.concat(applyOverrides(rows));
-  state.more = rows.length === 60;
+/** Fetch the list: all of it, every time. Only the rows in view are ever drawn (see renderRows). */
+async function loadThreads() {
+  const asked = listParams().toString();
+  const rows = await api("/api/threads?" + asked);
+  if (asked !== listParams().toString()) return;   // the list has changed since; a newer answer is coming
+  state.threads = applyOverrides(rows);
   renderList();
-  if (reset) countList();
-}
-
-/** Ask how long the whole list is; only the first pages of it are ever loaded. */
-async function countList() {
-  const asked = listParams(0).toString();
-  const count = await api("/api/threads/count?" + asked).catch(() => null);
-  if (asked !== listParams(0).toString()) return;   // the list has changed since; a newer answer is coming
-  state.count = count;
-  renderListFoot();
 }
 
 /** The strip under the list: what it is showing and how much of it there is. */
@@ -319,29 +308,34 @@ function renderListFoot() {
   let foot = $("#list-foot");
   if (!foot) { foot = el("div"); foot.id = "list-foot"; }
   $("#list").append(foot);
-  const c = state.count, n = x => x.toLocaleString();
+  const c = { total: state.threads.length, unread: state.threads.filter(t => t.unread).length }, n = x => x.toLocaleString();
   const what = state.collection ? state.collection.title
     : (state.q ? `Search in ${state.filter == null ? "all inboxes" : account(state.filter)?.email}`
       : state.filter == null ? "All inboxes" : account(state.filter)?.email || "Inbox")
       + (state.peopleOnly ? ", people only" : "") + (state.unreadOnly ? ", unread only" : "");
   foot.textContent = "";
   foot.append(el("span", "what", what));
-  if (c) foot.append(el("span", "n", `${n(c.total)} conversation${c.total === 1 ? "" : "s"}` + (c.unread && !state.unreadOnly ? ` · ${n(c.unread)} unread` : "")));
+  foot.append(el("span", "n", `${n(c.total)} conversation${c.total === 1 ? "" : "s"}` + (c.unread && !state.unreadOnly ? ` · ${n(c.unread)} unread` : "")));
   if (state.selected.size) foot.append(el("span", "sel", `${n(state.selected.size)} selected`));
 }
 
-let hoverTimer;
+// The whole list is held in memory, but only the rows in view exist as elements: each sits at
+// its own place in a box as tall as the full list, and rows are made and dropped as it scrolls.
+let hoverTimer, rowHeight = 0;
+const rowNodes = new Map();   // index in state.threads -> the row's element, for rows currently drawn
+
 function renderList() {
   const list = $("#list");
   const top = list.scrollTop;
   list.textContent = "";
+  rowNodes.clear();
   if (state.collection) {
     const bar = el("div");
     bar.id = "set-bar";
     const back = el("button", "", "✕");
     back.title = "Back to the inbox";
     back.onclick = () => goInbox();
-    bar.append(el("span", "name", `${state.collection.title} · ${state.threads.length}${state.more ? "+" : ""}`), back);
+    bar.append(el("span", "name", state.collection.title), back);
     list.append(bar);
   }
   state.cursor = Math.max(0, Math.min(state.cursor, state.threads.length - 1));
@@ -355,52 +349,87 @@ function renderList() {
     renderListFoot();
     return;
   }
-  state.threads.forEach((t, i) => {
-    const row = el("div", "row-t" + (t.unread ? " unread" : "") + (i === state.cursor ? " cursor" : "")
-      + (state.selected.has(key(t)) ? " sel" : "") + (state.open?.key === key(t) ? " open" : ""));
-    const av = avatar(t.from_name, t.from_addr);
-    const dot = el("span", "who-dot");
-    dot.style.background = account(t.account_id)?.color || "gray";
-    av.append(dot);
-    av.title = account(t.account_id)?.email || "";
-    const who = el("span", "who", t.senders || "(unknown)");
-    if (t.people) {
-      const p = el("span", "person");
-      p.append(icon("person"));
-      p.title = "A person wrote this";
-      who.prepend(p);
-    }
-    if (t.count > 1) who.append(el("span", "c", t.count));
-    const text = el("span", "text");
-    text.append(el("span", "subj", t.subject), el("span", "snip", t.snippet));
-    const marks = el("span", "marks");
-    if (t.has_attach) marks.append("📎");
-    if (t.starred) marks.append(el("span", "star", "★"));
-    if (t.in_inbox === false) marks.append(el("span", "gone", "Archived"));
-    const date = el("span", "date");
-    date.append(el("span", "d", fmtDate(t.date)));
-    row.append(el("span", "bar"), av, who, text, marks, date);
-    row.onclick = e => {
-      if (e.ctrlKey || e.metaKey) return openInWindow(t);
-      setCursor(i);
-      show(t);
-    };
-    // Start rendering as soon as the pointer rests on a row, so a click opens it instantly.
-    row.onmouseenter = () => { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => ensureView(t), 70); };
-    row.onmouseleave = () => clearTimeout(hoverTimer);
-    list.append(row);
-  });
+  const box = el("div");
+  box.id = "rows";
+  list.append(box);
+  // every row is the same height; measure one rather than assume (it follows the font and zoom)
+  const probe = rowNode(0);
+  box.append(probe);
+  rowHeight = probe.offsetHeight || rowHeight || 70;
+  probe.remove();
+  box.style.height = state.threads.length * rowHeight + "px";
   renderListFoot();
   list.scrollTop = top;
+  renderRows();
+}
+
+/** Draw the rows that are in view (and a few either side), and drop the ones that no longer are. */
+function renderRows() {
+  const list = $("#list"), box = $("#rows");
+  if (!box || !rowHeight) return;
+  const y = list.scrollTop - box.offsetTop;
+  const first = Math.max(0, Math.floor(y / rowHeight) - 10);
+  const last = Math.min(state.threads.length, Math.ceil((y + list.clientHeight) / rowHeight) + 10);
+  for (const [i, node] of rowNodes) if (i < first || i >= last) { node.remove(); rowNodes.delete(i); }
+  for (let i = first; i < last; i++) {
+    if (rowNodes.has(i)) continue;
+    const node = rowNode(i);
+    node.style.top = i * rowHeight + "px";
+    rowNodes.set(i, node);
+    box.append(node);
+  }
+}
+
+function rowNode(i) {
+  const t = state.threads[i];
+  const row = el("div", "row-t" + (t.unread ? " unread" : "") + (i === state.cursor ? " cursor" : "")
+    + (state.selected.has(key(t)) ? " sel" : "") + (state.open?.key === key(t) ? " open" : ""));
+  const av = avatar(t.from_name, t.from_addr);
+  const dot = el("span", "who-dot");
+  dot.style.background = account(t.account_id)?.color || "gray";
+  av.append(dot);
+  av.title = account(t.account_id)?.email || "";
+  const who = el("span", "who", t.senders || "(unknown)");
+  if (t.people) {
+    const p = el("span", "person");
+    p.append(icon("person"));
+    p.title = "A person wrote this";
+    who.prepend(p);
+  }
+  if (t.count > 1) who.append(el("span", "c", t.count));
+  const text = el("span", "text");
+  text.append(el("span", "subj", t.subject), el("span", "snip", t.snippet));
+  const marks = el("span", "marks");
+  if (t.has_attach) marks.append("📎");
+  if (t.starred) marks.append(el("span", "star", "★"));
+  if (t.in_inbox === false) marks.append(el("span", "gone", "Archived"));
+  const date = el("span", "date");
+  date.append(el("span", "d", fmtDate(t.date)));
+  row.append(el("span", "bar"), av, who, text, marks, date);
+  row.onclick = e => {
+    if (e.ctrlKey || e.metaKey) return openInWindow(t);
+    setCursor(i);
+    show(t);
+  };
+  // Start rendering as soon as the pointer rests on a row, so a click opens it instantly.
+  row.onmouseenter = () => { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => ensureView(t), 70); };
+  row.onmouseleave = () => clearTimeout(hoverTimer);
+  return row;
 }
 
 function setCursor(i) {
   const n = state.threads.length;
   state.cursor = Math.max(0, Math.min(n - 1, i));
-  const rows = $("#list").querySelectorAll(".row-t");
-  for (let r = 0; r < rows.length; r++) rows[r].classList.toggle("cursor", r === state.cursor);
-  rows[state.cursor]?.scrollIntoView({ block: "nearest" });
-  if (state.more && state.cursor > n - 15) loadThreads(false);
+  // bring the row into view, clear of the bars that stay put at the top and bottom of the list
+  const list = $("#list"), box = $("#rows");
+  if (box) {
+    const top = box.offsetTop + state.cursor * rowHeight;
+    const above = $("#set-bar")?.offsetHeight || 0, below = $("#list-foot")?.offsetHeight || 0;
+    if (top < list.scrollTop + above) list.scrollTop = top - above;
+    else if (top + rowHeight > list.scrollTop + list.clientHeight - below) list.scrollTop = top + rowHeight - list.clientHeight + below;
+    renderRows();
+  }
+  for (const [r, node] of rowNodes) node.classList.toggle("cursor", r === state.cursor);
 }
 
 let showTimer;
@@ -419,13 +448,13 @@ function moveCursor(delta) {
   if (next) setTimeout(() => ensureView(next), 150);
 }
 
-$("#list").addEventListener("scroll", e => {
-  const l = e.target;
-  if (state.more && l.scrollTop + l.clientHeight > l.scrollHeight - 600 && !loadThreads.busy) {
-    loadThreads.busy = true;
-    loadThreads(false).finally(() => (loadThreads.busy = false));
-  }
-});
+{
+  // keep the drawn rows up with the scroll position, at most once a frame
+  let queued = false;
+  const redraw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; renderRows(); }); };
+  $("#list").addEventListener("scroll", redraw);
+  new ResizeObserver(redraw).observe($("#list"));
+}
 
 // ---- rendered conversations ----------------------------------------------------
 // A view is a conversation laid out in the pane, with its message frames loaded. Views are
@@ -528,8 +557,7 @@ function hideView() {
 }
 
 function markOpenRow() {
-  const rows = $("#list").querySelectorAll(".row-t");
-  state.threads.forEach((t, i) => rows[i]?.classList.toggle("open", state.open?.key === key(t)));
+  for (const [i, node] of rowNodes) node.classList.toggle("open", state.open?.key === key(state.threads[i]));
 }
 
 function renderMessage(v, m, open) {
@@ -1146,8 +1174,6 @@ function act(op, list = targets(), { record = true } = {}) {
       unread: op === "read" ? 0 : op === "unread" ? 1 : undefined,
       starred: op === "star" ? true : op === "unstar" ? false : undefined });
     if (op === "archive") {
-      // keep the count under the list in step until the server's own figure arrives
-      if (state.count && row) { state.count.total--; if (row.unread) state.count.unread--; }
       state.threads = state.threads.filter(x => key(x) !== k);
       const v = state.views.get(k);
       if (v) dropView(v);
@@ -1647,18 +1673,12 @@ function assistantActed({ op, items }) {
 async function refresh() {
   state.accounts = await api("/api/accounts");
   renderAccounts();
-  // Re-read as many rows as are on screen, so paging and the cursor survive a refresh.
-  const want = Math.max(60, state.threads.length);
-  countList().catch(() => {});
-  let rows = [], page;
-  do {
-    page = await api("/api/threads?" + listParams(rows.length));
-    rows = rows.concat(page);
-  } while (page.length === 60 && rows.length < want);
+  const asked = listParams().toString();
+  let rows = await api("/api/threads?" + asked);
+  if (asked !== listParams().toString()) return;
   const at = state.open?.key || (state.threads[state.cursor] && key(state.threads[state.cursor]));
   rows = applyOverrides(rows);
   state.threads = rows;
-  state.more = page.length === 60;
   const again = rows.findIndex(t => key(t) === at);
   if (again >= 0) state.cursor = again;
   renderList();

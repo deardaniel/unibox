@@ -109,6 +109,9 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #work { flex: 1; min-height: 0; position: relative; display: flex; }
 #list { overflow-y: auto; overflow-x: hidden; outline: none; min-width: 0; display: flex; flex-direction: column; scroll-padding-bottom: 30px; }
 #list > * { flex: none; }
+#list { position: relative; }
+#rows { position: relative; }
+#rows .row-t { position: absolute; left: 0; right: 0; box-sizing: border-box; }
 /* how much the list holds: stays at the bottom of the pane, under however many rows there are */
 #list-foot { position: sticky; bottom: 0; z-index: 2; margin-top: auto; display: flex; gap: 10px; align-items: baseline;
              padding: 5px 12px; font-size: 12px; color: var(--muted); background: var(--bg); border-top: 1px solid var(--line); white-space: nowrap; }

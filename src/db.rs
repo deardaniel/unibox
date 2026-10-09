@@ -291,8 +291,6 @@ impl Db {
         unread_only: bool,
         people_only: bool,
         keep: &str,
-        limit: i64,
-        offset: i64,
     ) -> Result<Vec<ThreadRow>> {
         let c = self.conn()?;
         let like = format!("%{}%", query.replace('%', "").replace('_', " "));
@@ -313,13 +311,12 @@ impl Db {
                        WHERE s.account_id=m.account_id AND s.gm_thrid=m.gm_thrid
                          AND (s.subject LIKE ?2 OR s.from_name LIKE ?2 OR s.from_addr LIKE ?2 OR s.body_text LIKE ?2)))
               GROUP BY account_id, gm_thrid
-             HAVING (?5=0 OR SUM(seen=0)>0
-                     OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?6)))
-                AND (?7=0 OR SUM(COALESCE(automated, 0)=0)>0)
-              ORDER BY newest DESC
-              LIMIT ?3 OFFSET ?4",
+             HAVING (?3=0 OR SUM(seen=0)>0
+                     OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?4)))
+                AND (?5=0 OR SUM(COALESCE(automated, 0)=0)>0)
+              ORDER BY newest DESC",
         )?;
-        let rows = st.query_map(params![account, like, limit, offset, unread_only, keep, people_only], |r| {
+        let rows = st.query_map(params![account, like, unread_only, keep, people_only], |r| {
             Ok(ThreadRow {
                 account_id: r.get(0)?,
                 thrid: r.get(1)?,
@@ -338,28 +335,6 @@ impl Db {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
-    }
-
-    /// How many conversations `threads` would list in all with the same filters, and how many
-    /// of them have something unread.
-    pub fn thread_count(&self, account: Option<i64>, query: &str, unread_only: bool, people_only: bool, keep: &str) -> Result<(i64, i64)> {
-        let c = self.conn()?;
-        let like = format!("%{}%", query.replace('%', "").replace('_', " "));
-        Ok(c.query_row(
-            "SELECT COUNT(*), COALESCE(SUM(u>0), 0) FROM (
-               SELECT SUM(seen=0) AS u FROM messages m
-                WHERE in_inbox=1
-                  AND (?1 IS NULL OR account_id=?1)
-                  AND (?2='%%' OR EXISTS (SELECT 1 FROM messages s
-                         WHERE s.account_id=m.account_id AND s.gm_thrid=m.gm_thrid
-                           AND (s.subject LIKE ?2 OR s.from_name LIKE ?2 OR s.from_addr LIKE ?2 OR s.body_text LIKE ?2)))
-                GROUP BY account_id, gm_thrid
-               HAVING (?3=0 OR SUM(seen=0)>0
-                       OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?4)))
-                  AND (?5=0 OR SUM(COALESCE(automated, 0)=0)>0))",
-            params![account, like, unread_only, keep, people_only],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?)
     }
 
     pub fn thread_messages(&self, account_id: i64, thrid: &str) -> Result<Vec<MessageRow>> {

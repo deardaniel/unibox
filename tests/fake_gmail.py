@@ -7,6 +7,7 @@ plain TCP on 127.0.0.1:1143. Any address logs in with any password except "wrong
     python3 tests/fake_gmail.py &
     UNIBOX_IMAP=plain:127.0.0.1:1143 target/debug/unibox --serve --data /tmp/unibox-test
 """
+import os
 import re
 import select
 import socketserver
@@ -198,7 +199,8 @@ def mailbox(owner):
         Booking 13030 - Payment for the afternoon of the party, including delivery and collection</td>
         <td width="8"></td><td align="right" valign="top" style="font-size:16px" id="price">&euro;185.00</td></tr></table>
         </td></tr></table>""")
-    for i in range(70):
+    # FAKE_ROUTINE=3000 makes a long inbox, for trying the list at a realistic size
+    for i in range(int(os.environ.get("FAKE_ROUTINE", "70"))):
         add(100 + i, 30 + i * 7, frm=f"Sender {i} <sender{i}@example.com>", subject=f"Routine message number {i}",
             text=f"This is the body of routine message {i}. " * 4, seen=i % 3 != 0)
     return out
