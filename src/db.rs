@@ -77,6 +77,14 @@ impl Db {
     pub fn open(path: &Path) -> Result<Db> {
         let db = Db { path: path.to_path_buf() };
         let c = db.conn()?;
+        // The first version of this table only marked messages; it could not replay anything.
+        let old_pending: bool = c
+            .prepare("SELECT 1 FROM pragma_table_info('pending') WHERE name='gm_msgid'")?
+            .exists([])?
+            && !c.prepare("SELECT 1 FROM pragma_table_info('pending') WHERE name='op'")?.exists([])?;
+        if old_pending {
+            c.execute("DROP TABLE pending", [])?;
+        }
         c.execute_batch(
             "PRAGMA journal_mode=WAL;
              CREATE TABLE IF NOT EXISTS accounts(
@@ -111,12 +119,15 @@ impl Db {
              CREATE TABLE IF NOT EXISTS bodies(
                message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
                raw BLOB NOT NULL);
-             -- A local change that has not reached Gmail yet. While a row exists,
-             -- sync leaves that message's inbox/read/star state alone.
+             -- A local change that has not reached Gmail yet, in the order it was made. While a
+             -- row exists, sync leaves that message's inbox/read/star state alone. Rows survive
+             -- a restart, so a change made just before closing the app is still sent.
              CREATE TABLE IF NOT EXISTS pending(
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
                account_id INTEGER NOT NULL,
                gm_msgid TEXT NOT NULL,
-               PRIMARY KEY(account_id, gm_msgid));
+               op TEXT NOT NULL,
+               uid INTEGER NOT NULL);
              -- Conversations whose other messages (sent replies, archived mail) have been
              -- pulled from All Mail already.
              CREATE TABLE IF NOT EXISTS hydrated(
@@ -133,7 +144,6 @@ impl Db {
             // JSON list of attachments, filled in when the body is stored
             c.execute("ALTER TABLE messages ADD COLUMN attachments TEXT", [])?;
         }
-        c.execute("DELETE FROM pending", [])?; // nothing survives a restart mid-flight
         Ok(db)
     }
 

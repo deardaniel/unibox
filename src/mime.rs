@@ -91,7 +91,7 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 }
 
 /// Bump when `summarize` changes, so stored messages are summarised again at startup.
-pub const SUMMARY_VERSION: &str = "4";
+pub const SUMMARY_VERSION: &str = "5";
 
 /// What we keep alongside the raw message for the list view and for search.
 pub struct Summary {
@@ -139,11 +139,19 @@ pub fn summarize(raw: &[u8]) -> Summary {
     Summary { snippet, text, attachments }
 }
 
-/// Inline images carry a Content-ID and are not what people mean by "attachment".
+/// Pictures that the message body actually displays are not what people mean by "attachment".
+/// Having a Content-ID is not enough to tell: Gmail gives every attached file one.
 fn list_attachments(msg: &mail_parser::Message) -> Vec<Attachment> {
+    let html = msg.html_body.first().and_then(|_| msg.body_html(0)).unwrap_or_default();
+    let shown_inline = |a: &mail_parser::MessagePart| {
+        mime_of(a).starts_with("image/")
+            && a.content_id()
+                .map(|id| id.trim_matches(|c| c == '<' || c == '>'))
+                .is_some_and(|id| !id.is_empty() && html.contains(&format!("cid:{id}")))
+    };
     msg.attachments()
         .enumerate()
-        .filter(|(_, a)| a.content_id().is_none() || !mime_of(a).starts_with("image/"))
+        .filter(|(_, a)| !shown_inline(a))
         .map(|(index, a)| {
             let name = a.attachment_name().unwrap_or("attachment").to_string();
             let kind = preview_kind(&name, a.contents()).0;
@@ -413,6 +421,12 @@ Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
         assert_eq!(list[0]["name"], "report.pdf");
         assert_eq!(list[0]["mime"], "application/pdf");
         let (name, _, bytes) = attachment(MSG, list[0]["index"].as_u64().unwrap() as usize).unwrap();
+        // A photo attached in Gmail has a Content-ID too, but the body never refers to it.
+        let photo = b"From: a@b.c\r\nSubject: s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b1\r\n\r\n\
+--b1\r\nContent-Type: text/html\r\n\r\n<div>Photo attached.</div>\r\n\
+--b1\r\nContent-Type: image/jpeg; name=\"car.jpg\"\r\nContent-Disposition: attachment; filename=\"car.jpg\"\r\n\
+Content-ID: <f_abc123>\r\nX-Attachment-Id: f_abc123\r\nContent-Transfer-Encoding: base64\r\n\r\n/9j/4AAQ\r\n--b1--\r\n";
+        assert!(summarize(photo).attachments.contains("car.jpg"), "{}", summarize(photo).attachments);
         assert_eq!(name, "report.pdf");
         assert_eq!(bytes, b"%PDF-");
         assert!(inline_part(MSG, "logo@x").is_some());

@@ -190,8 +190,11 @@ class Handler(socketserver.StreamRequestHandler):
                 elif cmd == "UID SEARCH":
                     msgs = self.visible(user, selected)
                     thrids = set(re.findall(r"X-GM-THRID (\d+)", args))
+                    msgid = re.search(r"X-GM-MSGID (\d+)", args)
                     if thrids:
                         hits = [u for u, x in msgs.items() if x.thrid in thrids]
+                    elif msgid:
+                        hits = [u for u, x in msgs.items() if x.msgid == msgid.group(1)]
                     elif "has:attachment" in args:
                         hits = [u for u, x in msgs.items() if b"filename=" in x.raw]
                     else:
@@ -204,6 +207,17 @@ class Handler(socketserver.StreamRequestHandler):
                         for f in re.findall(r"\\\w+", flags):
                             (msgs[uid].flags.add if op.startswith("+") else msgs[uid].flags.discard)(f)
                     self.send(f"{tag} OK Success\r\n")
+                elif cmd == "UID COPY":
+                    # on Gmail, copying into INBOX just adds the Inbox label
+                    setstr, _, dest = args.partition(" ")
+                    msgs = self.visible(user, selected)
+                    if dest.strip('"').upper() == "INBOX":
+                        for uid in parse_set(setstr, list(msgs)):
+                            msgs[uid].inbox = True
+                            msgs[uid].uid_inbox += 5000   # back in the inbox under a new UID
+                        self.send(f"{tag} OK (Success)\r\n")
+                    else:
+                        self.send(f"{tag} NO [TRYCREATE] (Failure)\r\n")
                 elif cmd == "UID MOVE":
                     setstr, _, dest = args.partition(" ")
                     msgs = self.visible(user, selected)

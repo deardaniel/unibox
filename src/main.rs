@@ -275,8 +275,24 @@ async fn thread_action(
     State(app): State<Arc<App>>,
     Path((account_id, thrid)): Path<(i64, String)>,
     Json(body): Json<Action>,
-) -> Api<StatusCode> {
-    blocking(move || app.act(account_id, &thrid, &body.op)).await?;
+) -> Api<Json<serde_json::Value>> {
+    let logger = app.clone();
+    let msgids = blocking(move || app.act(account_id, &thrid, &body.op)).await.map_err(|e| {
+        logger.log(&format!("action failed: {}", e.1));
+        e
+    })?;
+    // which messages it touched, so an archive can be undone exactly
+    Ok(Json(serde_json::json!({ "msgids": msgids })))
+}
+
+#[derive(Deserialize)]
+struct Unarchive {
+    account_id: i64,
+    msgids: Vec<String>,
+}
+
+async fn unarchive(State(app): State<Arc<App>>, Json(body): Json<Unarchive>) -> Api<StatusCode> {
+    blocking(move || app.unarchive(body.account_id, &body.msgids)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -416,6 +432,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/parts", get(message_parts))
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
+        .route("/api/unarchive", post(unarchive))
         .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/message/:id/attachment/:index/preview", get(attachment_preview))

@@ -37,6 +37,7 @@ pub struct App {
     /// through the list cannot open a pile of connections to Gmail.
     hydrating: Mutex<()>,
     wake: Mutex<Option<mpsc::Sender<()>>>,
+    push_wake: Mutex<Option<mpsc::Sender<()>>>,
     /// (a pass is running, Unix time of the next scheduled pass)
     status: Mutex<(bool, i64)>,
 }
@@ -52,6 +53,7 @@ impl App {
             hydrated: Mutex::new(HashMap::new()),
             hydrating: Mutex::new(()),
             wake: Mutex::new(None),
+            push_wake: Mutex::new(None),
             status: Mutex::new((true, 0)),
         })
     }
@@ -94,6 +96,18 @@ impl App {
     }
 
     pub fn start(self: &Arc<App>) {
+        // The push thread sends queued changes (archive, read, star) to Gmail.
+        let (push_tx, push_rx) = mpsc::channel();
+        *self.push_wake.lock().unwrap() = Some(push_tx);
+        let pusher = self.clone();
+        std::thread::spawn(move || loop {
+            pusher.push_pending(); // first pass replays anything left from the last run
+            let _ = push_rx.recv_timeout(Duration::from_secs(60));
+            // let a burst of key presses land, so they go out as one batch
+            std::thread::sleep(Duration::from_millis(250));
+            while push_rx.try_recv().is_ok() {}
+        });
+
         let (tx, rx) = mpsc::channel();
         *self.wake.lock().unwrap() = Some(tx);
         let app = self.clone();
@@ -106,7 +120,7 @@ impl App {
                     let result = app.sync_account(acct.id, &acct.email);
                     let err = result.as_ref().err().map(|e| format!("{e:#}"));
                     if let Some(e) = &err {
-                        eprintln!("sync {}: {e}", acct.email);
+                        app.log(&format!("sync {}: {e}", acct.email));
                     }
                     more |= result.unwrap_or(false);
                     let _ = app.db.set_sync_result(acct.id, err.as_deref());
@@ -133,7 +147,7 @@ impl App {
             }
             for chunk in self.db.stored_bodies()?.chunks(100) {
                 let mut c = self.db.conn()?;
-                let tx = c.transaction()?;
+                let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                 for &id in chunk {
                     let raw: Vec<u8> = tx.query_row("SELECT raw FROM bodies WHERE message_id=?", [id], |r| r.get(0))?;
                     let s = mime::summarize(&raw);
@@ -305,7 +319,7 @@ impl App {
     /// Returns the UIDs of messages we have never seen, newest first.
     fn reconcile(&self, account_id: i64, listing: &[Fetched]) -> Result<Vec<u32>> {
         let mut c = self.db.conn()?;
-        let tx = c.transaction()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let pending: HashSet<String> = {
             let mut st = tx.prepare("SELECT gm_msgid FROM pending WHERE account_id=?")?;
             let rows = st.query_map([account_id], |r| r.get(0))?;
@@ -385,8 +399,13 @@ impl App {
         Ok(())
     }
 
-    /// Apply a user action to a whole conversation, locally at once and then on Gmail.
-    pub fn act(&self, account_id: i64, thrid: &str, op: &str) -> Result<()> {
+    /// Apply a user action to a whole conversation. The local copy changes at once and this
+    /// returns; the change is queued and sent to Gmail by the push thread.
+    ///
+    /// Transactions here and elsewhere in this file are opened IMMEDIATE. They read and then
+    /// write, and a deferred transaction doing that fails outright with "database is locked"
+    /// whenever another thread has written in between, which the busy timeout cannot wait out.
+    pub fn act(&self, account_id: i64, thrid: &str, op: &str) -> Result<Vec<String>> {
         let acct = self.db.account(account_id)?.ok_or_else(|| anyhow!("no such account"))?;
         let local = match op {
             "archive" => "in_inbox=0",
@@ -396,69 +415,203 @@ impl App {
             "unstar" => "starred=0",
             _ => return Err(anyhow!("unknown action {op}")),
         };
+        // Gmail stars, and marks unread, the latest message of a conversation.
+        let only_latest = if matches!(op, "star" | "unread") { " ORDER BY date DESC LIMIT 1" } else { "" };
+        let mut c = self.db.conn()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         // Only messages sitting in the inbox have a UID we can address.
-        let (msgids, uids): (Vec<String>, Vec<u32>) = {
-            let c = self.db.conn()?;
-            let filter = match op {
-                "star" => " ORDER BY date DESC LIMIT 1", // Gmail stars the latest message
-                "unread" => " ORDER BY date DESC LIMIT 1",
-                _ => "",
-            };
-            let mut st = c.prepare(&format!(
+        let targets: Vec<(String, u32)> = {
+            let mut st = tx.prepare(&format!(
                 "SELECT gm_msgid, uid FROM messages
-                  WHERE account_id=? AND gm_thrid=? AND in_inbox=1 AND uid IS NOT NULL{filter}"
+                  WHERE account_id=? AND gm_thrid=? AND in_inbox=1 AND uid IS NOT NULL{only_latest}"
             ))?;
             let rows = st.query_map(params![account_id, thrid], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.collect::<rusqlite::Result<Vec<(String, u32)>>>()?.into_iter().unzip()
+            rows.collect::<rusqlite::Result<_>>()?
         };
-        if uids.is_empty() {
-            return Ok(());
+        for (msgid, uid) in &targets {
+            tx.execute(
+                "INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?,?,?,?)",
+                params![account_id, msgid, op, uid],
+            )?;
+            tx.execute(
+                &format!("UPDATE messages SET {local} WHERE account_id=? AND gm_msgid=?"),
+                params![account_id, msgid],
+            )?;
         }
-        {
-            let c = self.db.conn()?;
-            for m in &msgids {
-                c.execute("INSERT OR IGNORE INTO pending(account_id, gm_msgid) VALUES(?,?)", params![account_id, m])?;
-                c.execute(
-                    &format!("UPDATE messages SET {local} WHERE account_id=? AND gm_msgid=?"),
-                    params![account_id, m],
-                )?;
-            }
+        tx.commit()?;
+        if !targets.is_empty() {
+            self.emit("changed", &acct.email);
+            self.push_soon();
         }
-        self.emit("changed", &acct.email);
+        Ok(targets.into_iter().map(|(msgid, _)| msgid).collect())
+    }
 
+    /// Undo an archive: put these messages back in the inbox. An archive that has not been
+    /// sent yet is simply withdrawn; one that has is reversed on Gmail.
+    pub fn unarchive(&self, account_id: i64, msgids: &[String]) -> Result<()> {
+        let acct = self.db.account(account_id)?.ok_or_else(|| anyhow!("no such account"))?;
+        // Holding the account lock means the push thread is not half-way through these.
         let lock = self.lock_for(account_id);
         let _guard = lock.lock().unwrap();
-        let pushed = (|| -> Result<()> {
-            let mut imap = self.connect(&acct.email)?;
-            imap.select("INBOX", false)?;
-            let set = uid_set(&uids);
-            match op {
-                // Moving to All Mail is how Gmail spells "archive" over IMAP.
-                "archive" => {
-                    let all_mail = imap.all_mail()?;
-                    imap.run(&format!("UID MOVE {set} {all_mail}"))?;
+        let mut c = self.db.conn()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for msgid in msgids {
+            let withdrawn = tx.execute(
+                "DELETE FROM pending WHERE account_id=? AND gm_msgid=? AND op='archive'",
+                params![account_id, msgid],
+            )?;
+            if withdrawn == 0 {
+                // already archived on Gmail; uid 0 = to be looked up in All Mail
+                tx.execute(
+                    "INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?,?,'unarchive',0)",
+                    params![account_id, msgid],
+                )?;
+            }
+            tx.execute(
+                "UPDATE messages SET in_inbox=1 WHERE account_id=? AND gm_msgid=?",
+                params![account_id, msgid],
+            )?;
+        }
+        tx.commit()?;
+        self.emit("changed", &acct.email);
+        self.push_soon();
+        Ok(())
+    }
+
+    fn push_soon(&self) {
+        if let Some(tx) = self.push_wake.lock().unwrap().as_ref() {
+            let _ = tx.send(());
+        }
+    }
+
+    /// Send every queued change to Gmail: one connection per account, consecutive changes
+    /// of the same kind in one command. Ten quick archives become a single MOVE.
+    fn push_pending(&self) {
+        type Row = (i64, i64, String, String, u32); // (row id, account, message id, op, uid)
+        let read = |account: Option<i64>| -> Result<Vec<Row>> {
+            let c = self.db.conn()?;
+            let mut st = c.prepare(
+                "SELECT id, account_id, gm_msgid, op, uid FROM pending WHERE ?1 IS NULL OR account_id=?1 ORDER BY id",
+            )?;
+            let rows = st.query_map([account], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        };
+        let mut accounts: Vec<i64> = match read(None) {
+            Ok(rows) => rows.iter().map(|r| r.1).collect(),
+            Err(e) => return self.log(&format!("reading queued changes: {e:#}")),
+        };
+        accounts.sort_unstable();
+        accounts.dedup();
+        for account_id in accounts {
+            let lock = self.lock_for(account_id);
+            let _guard = lock.lock().unwrap();
+            // Read the queue only once the lock is held: an undo may just have withdrawn rows.
+            let rows = match read(Some(account_id)) {
+                Ok(rows) => rows,
+                Err(e) => return self.log(&format!("reading queued changes: {e:#}")),
+            };
+            let mine: Vec<&Row> = rows.iter().collect();
+            // consecutive changes of one kind form a batch
+            let mut batches: Vec<(&str, Vec<&Row>)> = Vec::new();
+            for r in mine {
+                match batches.last_mut() {
+                    Some((op, batch)) if *op == r.3 => batch.push(r),
+                    _ => batches.push((r.3.as_str(), vec![r])),
                 }
-                "read" => drop(imap.run(&format!("UID STORE {set} +FLAGS.SILENT (\\Seen)"))?),
-                "unread" => drop(imap.run(&format!("UID STORE {set} -FLAGS.SILENT (\\Seen)"))?),
-                "star" => drop(imap.run(&format!("UID STORE {set} +FLAGS.SILENT (\\Flagged)"))?),
-                "unstar" => drop(imap.run(&format!("UID STORE {set} -FLAGS.SILENT (\\Flagged)"))?),
-                _ => unreachable!(),
             }
-            imap.logout();
-            Ok(())
-        })();
-        let c = self.db.conn()?;
-        for m in &msgids {
-            c.execute("DELETE FROM pending WHERE account_id=? AND gm_msgid=?", params![account_id, m])?;
-            if op == "archive" && pushed.is_ok() {
-                c.execute("UPDATE messages SET uid=NULL WHERE account_id=? AND gm_msgid=?", params![account_id, m])?;
+            if batches.is_empty() {
+                continue;
+            }
+            let mut done: Vec<i64> = Vec::new();
+            let result = (|| -> Result<()> {
+                let acct = self.db.account(account_id)?.ok_or_else(|| anyhow!("account removed"))?;
+                let mut imap = self.connect(&acct.email)?;
+                imap.select("INBOX", false)?;
+                let mut all_mail = None;
+                for (op, batch) in &batches {
+                    let uids: Vec<u32> = batch.iter().map(|r| r.4).collect();
+                    let set = uid_set(&uids);
+                    match *op {
+                        // Moving to All Mail is how Gmail spells "archive" over IMAP.
+                        "archive" => {
+                            if all_mail.is_none() {
+                                all_mail = Some(imap.all_mail()?);
+                            }
+                            imap.run(&format!("UID MOVE {set} {}", all_mail.as_deref().unwrap_or_default()))?;
+                        }
+                        // The reverse: find each message in All Mail and copy it to the inbox,
+                        // which on Gmail just puts the Inbox label back.
+                        "unarchive" => {
+                            if all_mail.is_none() {
+                                all_mail = Some(imap.all_mail()?);
+                            }
+                            imap.select(all_mail.as_deref().unwrap_or_default(), false)?;
+                            let mut found = Vec::new();
+                            for r in batch {
+                                if r.2.chars().all(|c| c.is_ascii_digit()) {
+                                    found.extend(imap.uid_search(&format!("X-GM-MSGID {}", r.2))?);
+                                }
+                            }
+                            if !found.is_empty() {
+                                imap.run(&format!("UID COPY {} INBOX", uid_set(&found)))?;
+                            }
+                            imap.select("INBOX", false)?;
+                        }
+                        "read" => drop(imap.run(&format!("UID STORE {set} +FLAGS.SILENT (\\Seen)"))?),
+                        "unread" => drop(imap.run(&format!("UID STORE {set} -FLAGS.SILENT (\\Seen)"))?),
+                        "star" => drop(imap.run(&format!("UID STORE {set} +FLAGS.SILENT (\\Flagged)"))?),
+                        "unstar" => drop(imap.run(&format!("UID STORE {set} -FLAGS.SILENT (\\Flagged)"))?),
+                        other => return Err(anyhow!("unknown queued change {other}")),
+                    }
+                    let c = self.db.conn()?;
+                    for r in batch {
+                        c.execute("DELETE FROM pending WHERE id=?", [r.0])?;
+                        if *op == "archive" {
+                            c.execute(
+                                "UPDATE messages SET uid=NULL WHERE account_id=? AND gm_msgid=? AND in_inbox=0",
+                                params![account_id, r.2],
+                            )?;
+                        }
+                        done.push(r.0);
+                    }
+                    self.log(&format!("{}: {op} sent for {} message(s)", acct.email, batch.len()));
+                }
+                imap.logout();
+                // messages put back in the inbox need their new inbox UIDs
+                if batches.iter().any(|(op, _)| *op == "unarchive") {
+                    self.sync_soon();
+                }
+                Ok(())
+            })();
+            if let Err(e) = result {
+                // Give up on what is left for this account. The local copy is now wrong for
+                // those messages; the next sync puts back what Gmail really has.
+                self.log(&format!("account {account_id}: sending changes failed: {e:#}"));
+                if let Ok(c) = self.db.conn() {
+                    for (_, batch) in &batches {
+                        for r in batch.iter().filter(|r| !done.contains(&r.0)) {
+                            let _ = c.execute("DELETE FROM pending WHERE id=?", [r.0]);
+                        }
+                    }
+                }
+                self.emit("error", &format!("Gmail didn't accept a change, so it has been undone: {e:#}"));
+                self.sync_soon();
             }
         }
-        if pushed.is_err() {
-            // Local state is now wrong; the next sync puts back what Gmail really has.
-            self.sync_soon();
+    }
+
+    /// Append a line to unibox.log in the data folder. The Windows build has no console.
+    pub fn log(&self, line: &str) {
+        use std::io::Write;
+        eprintln!("{line}");
+        let path = self.dir.join("unibox.log");
+        if std::fs::metadata(&path).map(|m| m.len() > 1_000_000).unwrap_or(false) {
+            let _ = std::fs::remove_file(&path);
         }
-        pushed
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(f, "{secs} {line}");
+        }
     }
 }
 

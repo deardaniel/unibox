@@ -192,7 +192,7 @@ async function loadThreads(reset) {
   const p = new URLSearchParams({ q: state.q, offset });
   if (state.filter != null) p.set("account", state.filter);
   const rows = await api("/api/threads?" + p);
-  state.threads = reset ? rows : state.threads.concat(rows);
+  state.threads = reset ? applyOverrides(rows) : state.threads.concat(applyOverrides(rows));
   state.more = rows.length === 60;
   renderList();
 }
@@ -349,7 +349,7 @@ function show(t) {
   }
   // Paging past a conversation should not mark it read; resting on it does.
   clearTimeout(readTimer);
-  if (t.unread) readTimer = setTimeout(() => { if (state.open === v) act("read", [t]); }, READ_AFTER_MS);
+  if (t.unread) readTimer = setTimeout(() => { if (state.open === v) act("read", [t], { record: false }); }, READ_AFTER_MS);
 }
 
 function hideView() {
@@ -596,6 +596,29 @@ function replyInGmail() {
 }
 
 // ---- actions ---------------------------------------------------------------
+// A change shows at once, but a list refresh already on its way back from the server can still
+// carry the old state and would undo it on screen. Each change is remembered here until the
+// server has certainly caught up, and every list that arrives is corrected against it.
+const overrides = new Map();   // thread key -> { archive, unread, starred, until }
+function remember(k, change) {
+  overrides.set(k, { ...overrides.get(k), ...change, until: Infinity });
+}
+function settled(k) {
+  const o = overrides.get(k);
+  if (o) o.until = Date.now() + 3000;
+}
+function applyOverrides(rows) {
+  const now = Date.now();
+  for (const [k, o] of overrides) if (o.until < now) overrides.delete(k);
+  if (!overrides.size) return rows;
+  return rows.filter(t => !overrides.get(key(t))?.archive).map(t => {
+    const o = overrides.get(key(t));
+    if (o?.unread != null) t.unread = o.unread;
+    if (o?.starred != null) t.starred = o.starred;
+    return t;
+  });
+}
+
 // Which conversations an action applies to: the selection, else the open one, else the cursor row.
 function targets() {
   if (state.selected.size) return state.threads.filter(t => state.selected.has(key(t)));
@@ -604,12 +627,23 @@ function targets() {
   return t ? [t] : [];
 }
 
-function act(op, list = targets()) {
+/** The last thing done, so z can take it back: { op, items: [{ t, index, sent }] }. */
+let lastAction = null;
+
+/** `record: false` is for changes the user did not make by hand (an undo, or marking a
+ *  conversation read because it was opened), which must not become the thing z undoes. */
+function act(op, list = targets(), { record = true } = {}) {
   if (!list.length) return;
+  const undoing = !record;
+  if (record) lastAction = { op, items: [] };
   // Reflect it immediately; the server confirms (or the next sync corrects) afterwards.
   for (const t of list) {
     const k = key(t);
-    const row = state.threads.find(x => key(x) === k);
+    const index = state.threads.findIndex(x => key(x) === k);
+    const row = state.threads[index];
+    remember(k, { archive: op === "archive" || undefined,
+      unread: op === "read" ? 0 : op === "unread" ? 1 : undefined,
+      starred: op === "star" ? true : op === "unstar" ? false : undefined });
     if (op === "archive") {
       state.threads = state.threads.filter(x => key(x) !== k);
       const v = state.views.get(k);
@@ -620,11 +654,40 @@ function act(op, list = targets()) {
       if (op === "star") row.starred = true;
       if (op === "unstar") row.starred = false;
     }
-    api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } })
-      .catch(e => toast("Gmail didn't accept that: " + e.message));
+    // the server answers with the messages it changed, which is what an undo needs
+    const sent = api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } })
+      .catch(e => { overrides.delete(k); refreshSoon(); toast("That didn't go through: " + e.message); return null; })
+      .finally(() => settled(k));
+    if (!undoing) lastAction.items.push({ t: row || t, index, sent });
   }
   state.selected.clear();
   renderList();
+}
+
+const INVERSE = { read: "unread", unread: "read", star: "unstar", unstar: "star" };
+async function undo() {
+  const last = lastAction;
+  if (!last) return toast("Nothing to undo.");
+  lastAction = null;
+  if (last.op !== "archive") {
+    act(INVERSE[last.op], last.items.map(i => i.t), { record: false });
+    return toast("Undone.");
+  }
+  // Put the rows back where they were straight away, then tell the server.
+  for (const { t, index } of [...last.items].sort((a, b) => a.index - b.index)) {
+    overrides.delete(key(t));
+    if (!state.threads.some(x => key(x) === key(t))) state.threads.splice(Math.min(Math.max(index, 0), state.threads.length), 0, t);
+  }
+  renderList();
+  const first = last.items[0];
+  if (first) { setCursor(state.threads.findIndex(x => key(x) === key(first.t))); show(first.t); }
+  toast(last.items.length > 1 ? `${last.items.length} conversations back in the inbox.` : "Back in the inbox.");
+  for (const { t, sent } of last.items) {
+    const done = await sent;   // the archive request itself has to have landed first
+    if (!done?.msgids?.length) continue;
+    api("/api/unarchive", { body: { account_id: t.account_id, msgids: done.msgids } })
+      .catch(e => { toast("Couldn't undo: " + e.message); refreshSoon(); });
+  }
 }
 
 /** After archiving: move on to the conversation that took its place in the list. */
@@ -636,7 +699,12 @@ function leaveConversation() {
   $("#list").focus();
 }
 
-function archive() { act("archive"); leaveConversation(); }
+function archive() {
+  const n = targets().length;
+  act("archive");
+  leaveConversation();
+  if (n) toast((n > 1 ? `${n} conversations archived.` : "Archived.") + " Press z to undo.");
+}
 
 function markUnread() {
   clearTimeout(readTimer);
@@ -699,7 +767,20 @@ function setListWidth(px, save) {
 }
 
 // ---- keyboard --------------------------------------------------------------
-let gPending = 0;
+let gPending = 0, starPending = 0;
+
+/** g i: back to the plain inbox, out of any search or account filter. */
+function goInbox() {
+  $("#search").value = "";
+  state.q = "";
+  setFilter(null);
+}
+
+function selectAll(on) {
+  state.selected = new Set(on ? state.threads.map(key) : []);
+  renderList();
+  if (on) toast(`${state.selected.size} conversations selected. Esc to clear.`);
+}
 function onKey(e) {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (preview.m) {
@@ -726,8 +807,15 @@ function onKey(e) {
     return;
   }
   if (k === "Enter" && e.shiftKey) { openInWindow(); return e.preventDefault(); }
-  if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; setFilter(null); return e.preventDefault(); }
+  if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; goInbox(); return e.preventDefault(); }
   gPending = 0;
+  // * then a selects every conversation in the list, * then n none (as in Gmail)
+  if (starPending && Date.now() - starPending < 1500 && (k === "a" || k === "n")) {
+    starPending = 0;
+    selectAll(k === "a");
+    return e.preventDefault();
+  }
+  starPending = 0;
   switch (k) {
     case "j": case "ArrowDown": moveCursor(1); break;
     case "k": case "ArrowUp": moveCursor(-1); break;
@@ -739,6 +827,7 @@ function onKey(e) {
     case "p": if (state.open) focusMessage(state.open.focus - 1); break;
     case "e": archive(); break;
     case "s": toggleStar(); break;
+    case "z": undo(); break;
     case "I": act("read"); break;
     case "U": markUnread(); break;
     case "x": {
@@ -752,6 +841,7 @@ function onKey(e) {
     case "/": $("#search").focus(); $("#search").select(); break;
     case "?": $("#help-dialog").showModal(); break;
     case "g": gPending = Date.now(); break;
+    case "*": starPending = Date.now(); break;
     default:
       if (/^[0-9]$/.test(k)) {
         const a = k === "0" ? null : state.accounts[+k - 1];
@@ -833,6 +923,7 @@ async function refresh() {
     rows = rows.concat(page);
   } while (page.length === 60 && rows.length < want);
   const at = state.open?.key || (state.threads[state.cursor] && key(state.threads[state.cursor]));
+  rows = applyOverrides(rows);
   state.threads = rows;
   state.more = page.length === 60;
   const again = rows.findIndex(t => key(t) === at);
@@ -870,7 +961,7 @@ function listen() {
     const t = { account_id: +account_id, thrid, subject: "" };
     show(t);
     await state.open.ready;
-    if (state.open.messages.some(m => !m.seen)) act("read", [t]);
+    if (state.open.messages.some(m => !m.seen)) act("read", [t], { record: false });
     listen();
     return;
   }
