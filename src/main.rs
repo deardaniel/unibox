@@ -327,6 +327,11 @@ async fn message_html(
     Ok((untrusted_page("text/html; charset=utf-8", pictures), html).into_response())
 }
 
+/// The inbox conversations with mail from the same sender (or group) as this message.
+async fn same_source(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<Json<Vec<db::ThreadRow>>> {
+    Ok(Json(blocking(move || app.db.threads_from_same_source(id)).await?))
+}
+
 /// Leave a mailing list by the sender's own one-click address, and remember having done so.
 async fn unsubscribe(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<StatusCode> {
     let logger = app.clone();
@@ -575,6 +580,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/html", get(message_html))
         .route("/api/message/:id/parts", get(message_parts))
         .route("/api/message/:id/unsubscribe", post(unsubscribe))
+        .route("/api/message/:id/same-source", get(same_source))
         .route("/api/pictures", post(picture_sender))
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))

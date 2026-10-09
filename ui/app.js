@@ -549,6 +549,13 @@ async function messageMenu(anchor, node, m) {
   item("text", "Plain text", !!parts?.text);
   item("source", "Original message", !!parts);
   if (m.has_body && current === "html" && node.dataset.pictures !== "1" && !m.pictures) {
+  {
+    const from = m.facts?.group?.address ? "the group " + m.facts.group.address : m.from_name || m.from_addr;
+    const b = el("button", "sep", `Archive everything from ${from}…`);
+    b.title = "Archive every inbox conversation from this " + (m.facts?.group?.address ? "group" : "sender");
+    b.onclick = () => { menu.remove(); archiveAllFrom(m, from); };
+    menu.append(b);
+  }
     const b = el("button", "sep", "Show pictures");
     b.onclick = () => { menu.remove(); showPictures(node, m); };
     menu.append(b);
@@ -1098,6 +1105,17 @@ function leaveConversation() {
 function archive() {
   act("archive");
   leaveConversation();
+}
+
+/** Clear out everything in the inbox from one sender or group. One z brings it all back. */
+async function archiveAllFrom(m, from) {
+  const rows = await api(`/api/message/${m.id}/same-source`).catch(e => (toast(e.message), []));
+  if (!rows.length) return;
+  if (rows.length > 1 && !confirm(`Archive ${rows.length} conversations from ${from}?\n\nPress z afterwards to undo.`)) return;
+  const wasOpen = rows.some(t => key(t) === state.open?.key);
+  act("archive", rows);
+  if (wasOpen) leaveConversation();
+  toast(rows.length > 1 ? `Archived ${rows.length} conversations from ${from}.` : "Archived.");
 }
 
 function markUnread() {

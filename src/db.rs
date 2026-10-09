@@ -596,6 +596,32 @@ impl Db {
         Ok(out)
     }
 
+    /// Inbox conversations holding mail from the same source as this message: the same Google
+    /// Group if it came through one, otherwise the same sender address. Any account.
+    pub fn threads_from_same_source(&self, message_id: i64) -> Result<Vec<ThreadRow>> {
+        let c = self.conn()?;
+        let source: Option<(String, Option<String>)> = c
+            .query_row(
+                "SELECT from_addr, json_extract(facts, '$.group.address') FROM messages WHERE id=?",
+                [message_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((from, group)) = source else { return Ok(vec![]) };
+        let group = group.filter(|g| !g.is_empty());
+        if group.is_none() && from.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut st = c.prepare(
+            "SELECT DISTINCT account_id, gm_thrid FROM messages
+              WHERE in_inbox=1
+                AND CASE WHEN ?1 IS NULL THEN from_addr=?2 COLLATE NOCASE AND json_extract(facts, '$.group.address') IS NULL
+                         ELSE json_extract(facts, '$.group.address')=?1 END",
+        )?;
+        let keys: Vec<(i64, String)> = st.query_map(params![group, from], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        self.threads_by_keys(&keys)
+    }
+
     /// List rows for specific conversations, wherever they are (inbox or not), newest first.
     pub fn threads_by_keys(&self, keys: &[(i64, String)]) -> Result<Vec<ThreadRow>> {
         let c = self.conn()?;
@@ -605,7 +631,7 @@ impl Db {
                         SELECT CASE WHEN t.from_name='' THEN t.from_addr ELSE t.from_name END AS n
                           FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid
                          GROUP BY n ORDER BY MIN(t.date))),
-                    COUNT(*), SUM(seen=0 AND in_inbox=1), SUM(starred)>0, SUM(has_attach)>0,
+                    COUNT(*), COALESCE(SUM(seen=0 AND in_inbox=1), 0), SUM(starred)>0, SUM(has_attach)>0,
                     from_name, from_addr, SUM(in_inbox)>0
                FROM messages m WHERE account_id=? AND gm_thrid=?
               GROUP BY account_id, gm_thrid",
