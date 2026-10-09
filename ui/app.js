@@ -669,7 +669,8 @@ function focusMessage(i, scroll = true) {
   if (!v || !v.messages.length) return;
   v.focus = Math.max(0, Math.min(v.messages.length - 1, i));
   const nodes = v.node.querySelector(".messages").children;
-  for (let n = 0; n < nodes.length; n++) nodes[n].classList.toggle("focus", n === v.focus && nodes.length > 1);
+  // the outline marks where n/p has taken you; it isn't drawn just for opening a conversation
+  for (let n = 0; n < nodes.length; n++) nodes[n].classList.toggle("focus", scroll && n === v.focus && nodes.length > 1);
   const node = nodes[v.focus];
   if (!node) return;
   if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); }
