@@ -59,7 +59,7 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 }
 
 /// Bump when `summarize` changes, so stored messages are summarised again at startup.
-pub const SUMMARY_VERSION: &str = "2";
+pub const SUMMARY_VERSION: &str = "3";
 
 /// What we keep alongside the raw message for the list view and for search.
 pub struct Summary {
@@ -99,7 +99,10 @@ pub fn summarize(raw: &[u8]) -> Summary {
     }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let text: String = text.chars().take(20_000).collect();
-    let snippet: String = text.chars().take(220).collect();
+    // Link addresses make a poor preview; the full text (kept for search) still has them.
+    static LINK: OnceLock<Regex> = OnceLock::new();
+    let readable = re(&LINK, r"[<\[(]?https?://\S+").replace_all(&text, " ");
+    let snippet: String = readable.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(220).collect();
     let attachments = serde_json::to_string(&list_attachments(&msg)).unwrap_or_else(|_| "[]".into());
     Summary { snippet, text, attachments }
 }
@@ -251,6 +254,8 @@ Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
         assert!(!render_html(msg, 1).contains("Hidden Title"));
         let s = summarize(msg);
         assert!(s.snippet.starts_with("The world"), "got {:?}", s.snippet);
+        let plain = b"From: a@b.c\r\nSubject: s\r\n\r\n<http://email.example.com/c/eJxUkEtu> Showtimes for [https://x.example/y] Friday\r\n";
+        assert_eq!(summarize(plain).snippet, "Showtimes for Friday");
     }
 
     #[test]
