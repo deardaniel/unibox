@@ -600,31 +600,19 @@ impl Db {
         Ok(out)
     }
 
-    /// Inbox conversations holding mail from the same source as this message: the same Google
-    /// Group if it came through one, otherwise the same sender address. Any account.
+    /// Inbox conversations holding mail from the same sender address as this message, in any
+    /// account. Mail that came through a Google Group counts by who wrote it, not by the group:
+    /// a group is often just an address that many senders write to.
     pub fn threads_from_same_source(&self, message_id: i64) -> Result<Vec<ThreadRow>> {
         let c = self.conn()?;
-        let source: Option<(String, Option<String>)> = c
-            .query_row(
-                "SELECT from_addr, json_extract(facts, '$.group.address') FROM messages WHERE id=?",
-                [message_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        let Some((from, group)) = source else { return Ok(vec![]) };
-        let group = group.filter(|g| !g.is_empty());
+        let from: Option<String> = c.query_row("SELECT from_addr FROM messages WHERE id=?", [message_id], |r| r.get(0)).optional()?;
+        let Some(from) = from.filter(|f| !f.is_empty()) else { return Ok(vec![]) };
         // never "everything from me": that is every conversation the owner replied in
-        let own: bool = c.prepare("SELECT 1 FROM accounts WHERE email=? COLLATE NOCASE")?.exists([&from])?;
-        if group.is_none() && (from.is_empty() || own) {
+        if c.prepare("SELECT 1 FROM accounts WHERE email=? COLLATE NOCASE")?.exists([&from])? {
             return Ok(vec![]);
         }
-        let mut st = c.prepare(
-            "SELECT DISTINCT account_id, gm_thrid FROM messages
-              WHERE in_inbox=1
-                AND CASE WHEN ?1 IS NULL THEN from_addr=?2 COLLATE NOCASE AND json_extract(facts, '$.group.address') IS NULL
-                         ELSE json_extract(facts, '$.group.address')=?1 END",
-        )?;
-        let keys: Vec<(i64, String)> = st.query_map(params![group, from], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        let mut st = c.prepare("SELECT DISTINCT account_id, gm_thrid FROM messages WHERE in_inbox=1 AND from_addr=? COLLATE NOCASE")?;
+        let keys: Vec<(i64, String)> = st.query_map([&from], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
         self.threads_by_keys(&keys)
     }
 

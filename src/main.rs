@@ -327,7 +327,7 @@ async fn message_html(
     Ok((untrusted_page("text/html; charset=utf-8", pictures), html).into_response())
 }
 
-/// The inbox conversations with mail from the same sender (or group) as this message.
+/// The inbox conversations with mail from the same sender as this message.
 async fn same_source(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<Json<Vec<db::ThreadRow>>> {
     Ok(Json(blocking(move || app.db.threads_from_same_source(id)).await?))
 }

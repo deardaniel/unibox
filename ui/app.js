@@ -568,9 +568,9 @@ async function messageMenu(anchor, node, m) {
   // by Gmail having recorded no check, which only happens to mail sent from the account
   const mine = state.accounts.some(a => a.email.toLowerCase() === m.from_addr.toLowerCase()) || (m.trust && m.trust.level === "none");
   if (!mine) {
-    const from = m.facts?.group?.address ? "the group " + m.facts.group.address : m.from_name || m.from_addr;
+    const from = m.from_name || m.from_addr;
     const b = el("button", "sep", `Archive everything from ${from}…`);
-    b.title = "Archive every inbox conversation from this " + (m.facts?.group?.address ? "group" : "sender");
+    b.title = `Archive every inbox conversation with mail from ${m.from_addr}`;
     b.onclick = () => { menu.remove(); archiveAllFrom(m, from); };
     menu.append(b);
   }
@@ -1169,11 +1169,11 @@ function archive() {
   leaveConversation();
 }
 
-/** Clear out everything in the inbox from one sender or group. One z brings it all back. */
+/** Clear out everything in the inbox from one sender. One z brings it all back. */
 async function archiveAllFrom(m, from) {
   const rows = await api(`/api/message/${m.id}/same-source`).catch(e => (toast(e.message), []));
   if (!rows.length) return;
-  if (rows.length > 1 && !confirm(`Archive ${rows.length} conversations from ${from}?\n\nPress z afterwards to undo.`)) return;
+  if (rows.length > 1 && !confirm(`Archive ${rows.length} conversations from ${from} (${m.from_addr})?`)) return;
   const wasOpen = rows.some(t => key(t) === state.open?.key);
   act("archive", rows);
   if (wasOpen) leaveConversation();
