@@ -181,7 +181,7 @@ const FRAME_CSS: &str = "
 html,body{height:auto!important;min-height:0!important}
 html{overflow-x:auto!important;overflow-y:hidden!important}
 body{margin:0!important;padding:12px 16px!important;background:#fff;color:#111;
-     font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     font:15px/1.5 'Segoe UI','Yu Gothic UI','Meiryo',-apple-system,BlinkMacSystemFont,sans-serif;
      -webkit-text-size-adjust:100%;overflow-wrap:anywhere}
 img{max-width:100%!important;height:auto!important}
 table{max-width:100%!important}

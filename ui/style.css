@@ -16,7 +16,11 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink);
-       font: 14px/1.4 "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }
+       /* Segoe UI has no Japanese glyphs. Name Yu Gothic UI for them: left to itself Windows falls
+          back to a font with only Regular and Bold, so semibold Japanese came out heavier than the
+          Latin text beside it. */
+       font: 14px/1.4 "Segoe UI", "Yu Gothic UI", "Meiryo", -apple-system, BlinkMacSystemFont, sans-serif;
+       overflow: hidden; }
 button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
          border-radius: 6px; padding: 5px 11px; cursor: pointer; }
 button:hover { background: var(--hover); }
