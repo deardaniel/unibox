@@ -274,7 +274,7 @@ impl App {
                 for &id in chunk {
                     let raw: Vec<u8> = tx.query_row("SELECT raw FROM bodies WHERE message_id=?", [id], |r| r.get(0))?;
                     let s = mime::summarize(&raw);
-                    Db::set_summary(&tx, id, &s.snippet, &s.text, &s.attachments)?;
+                    Db::set_summary(&tx, id, &s)?;
                 }
                 tx.commit()?;
             }
@@ -779,6 +779,6 @@ fn store_fetched_body(c: &rusqlite::Connection, account_id: i64, f: &Fetched) ->
     let (Some(msgid), Some(body)) = (f.get("X-GM-MSGID"), f.get("BODY")) else { return Ok(false) };
     let raw = body.bytes();
     let s = mime::summarize(raw);
-    Db::store_body(c, account_id, &msgid.text(), raw, &s.snippet, &s.text, &s.attachments)?;
+    Db::store_body(c, account_id, &msgid.text(), raw, &s)?;
     Ok(true)
 }

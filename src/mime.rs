@@ -114,7 +114,7 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 }
 
 /// Bump when `summarize` changes, so stored messages are summarised again at startup.
-pub const SUMMARY_VERSION: &str = "5";
+pub const SUMMARY_VERSION: &str = "6";
 
 /// What we keep alongside the raw message for the list view and for search.
 pub struct Summary {
@@ -122,11 +122,15 @@ pub struct Summary {
     pub text: String,
     /// JSON list of the attachments, as the UI wants it.
     pub attachments: String,
+    /// JSON of what else the message says about itself (see `facts`).
+    pub facts: String,
+    /// Sent by a system rather than written by a person.
+    pub automated: bool,
 }
 
 pub fn summarize(raw: &[u8]) -> Summary {
     let Some(msg) = MessageParser::default().parse(raw) else {
-        return Summary { snippet: String::new(), text: String::new(), attachments: "[]".into() };
+        return Summary { snippet: String::new(), text: String::new(), attachments: "[]".into(), facts: "{}".into(), automated: false };
     };
     let mut text = msg.body_text(0).map(|t| t.into_owned()).unwrap_or_default();
     // Plenty of HTML mail ships a throwaway plain-text part ("view this in a browser"),
@@ -159,7 +163,8 @@ pub fn summarize(raw: &[u8]) -> Summary {
     let readable = re(&LINK, r"[<\[(]?https?://\S+").replace_all(&text, " ");
     let snippet: String = readable.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(220).collect();
     let attachments = serde_json::to_string(&list_attachments(&msg)).unwrap_or_else(|_| "[]".into());
-    Summary { snippet, text, attachments }
+    let facts = crate::facts::facts(&msg, raw);
+    Summary { snippet, text, attachments, automated: facts.automated, facts: serde_json::to_string(&facts).unwrap_or_else(|_| "{}".into()) }
 }
 
 /// Pictures that the message body actually displays are not what people mean by "attachment".

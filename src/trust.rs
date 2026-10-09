@@ -41,9 +41,10 @@ pub struct Trust {
     pub raw: String,
 }
 
-/// The first `Authentication-Results` header in a message head, unfolded. Being first is
-/// what makes it Gmail's: a sender can put a forged one in their message, but only below.
-fn top_auth_results(head: &[u8]) -> Option<String> {
+/// The first header called `wanted` in a message head, unfolded. For `Authentication-Results`
+/// being first is what makes it Gmail's: a sender can put a forged one in their message, but
+/// only below.
+fn first_header(head: &[u8], wanted: &str) -> Option<String> {
     let text = String::from_utf8_lossy(head);
     let mut found: Option<String> = None;
     for line in text.split('\n') {
@@ -60,7 +61,7 @@ fn top_auth_results(head: &[u8]) -> Option<String> {
             Some(_) => break,
             None if !continues => {
                 if let Some((name, value)) = line.split_once(':') {
-                    if name.eq_ignore_ascii_case("Authentication-Results") {
+                    if name.eq_ignore_ascii_case(wanted) {
                         found = Some(value.trim().to_string());
                     }
                 }
@@ -143,7 +144,24 @@ pub fn assess(head: &[u8]) -> Trust {
         .unwrap_or_default()
         .to_lowercase();
 
-    let Some(raw) = top_auth_results(head) else { return t };
+    match first_header(head, "Authentication-Results") {
+        Some(raw) => judge(t, raw),
+        None => t,
+    }
+}
+
+/// What a Google Group found when the message first reached it, for the person who wrote it.
+/// The group sends the message on under its own name, so Gmail's verdict at the top is about
+/// the group; this one, which the group records, is about the original sender.
+pub fn assess_original(head: &[u8], sender_addr: &str) -> Option<Trust> {
+    let raw = first_header(head, "X-Original-Authentication-Results")?;
+    let t = Trust { level: "none", domain: domain_of(sender_addr), ..Default::default() };
+    Some(judge(t, raw))
+}
+
+/// Fill in the verdict from one `Authentication-Results` value, for the domain in `t`.
+fn judge(mut t: Trust, raw: String) -> Trust {
+    let domain = t.domain.clone();
     let clean = without_comments(&raw);
     let mut parts = clean.split(';');
     // only Gmail's own verdict counts

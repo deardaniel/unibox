@@ -7,6 +7,7 @@ mod imap;
 mod mime;
 mod secrets;
 mod sync;
+mod facts;
 mod trust;
 
 use axum::extract::{Path, Query, Request, State};
@@ -157,6 +158,9 @@ struct ThreadQuery {
     /// Comma-separated "account:thread" keys to keep listed while `unread` is on.
     #[serde(default)]
     keep: String,
+    /// Leave out conversations where everything in the inbox was sent by a system.
+    #[serde(default)]
+    people: bool,
 }
 
 async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>) -> Api<Json<Vec<db::ThreadRow>>> {
@@ -168,7 +172,7 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
                 return Ok(rows.into_iter().skip(q.offset.max(0) as usize).take(60).collect());
             }
             let keep: Vec<&str> = q.keep.split(',').filter(|k| !k.is_empty()).collect();
-            app.db.threads(q.account, q.q.trim(), q.unread, &serde_json::to_string(&keep)?, 60, q.offset.max(0))
+            app.db.threads(q.account, q.q.trim(), q.unread, q.people, &serde_json::to_string(&keep)?, 60, q.offset.max(0))
         })
         .await?,
     ))
@@ -252,11 +256,15 @@ async fn get_thread(
     }
     let out = blocking(move || {
         let mut messages = Vec::new();
+        let (pictures, unsubscribed) = (app.db.picture_senders()?, app.db.unsubscribed()?);
         for m in app.db.thread_messages(account_id, &thrid)? {
             // what Gmail made of the sender, read from the top of the stored message
             let head = if m.has_body { app.db.message_head(m.id, 65536)? } else { None };
             let mut row = serde_json::to_value(&m)?;
             row["trust"] = serde_json::to_value(head.map(|h| trust::assess(&h)))?;
+            let sender = m.from_addr.to_lowercase();
+            row["pictures"] = pictures.contains(&sender).into();
+            row["unsubscribed"] = unsubscribed.contains(&sender).into();
             messages.push(row);
         }
         Ok(serde_json::json!({ "messages": messages }))
@@ -268,16 +276,25 @@ async fn get_thread(
 /// Headers for anything that came out of an email: never let it act as part of the app.
 /// A stored message never changes, so the window may keep its copy.
 fn untrusted(mime: &str) -> [(header::HeaderName, HeaderValue); 4] {
+    untrusted_page(mime, true)
+}
+
+/// Without `pictures`, nothing is fetched from outside: only pictures that came inside the
+/// message are shown, so the sender cannot tell that it was opened.
+fn untrusted_page(mime: &str, pictures: bool) -> [(header::HeaderName, HeaderValue); 4] {
     [
         (header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=2592000, immutable")),
         (header::CONTENT_TYPE, HeaderValue::from_str(mime).unwrap_or(HeaderValue::from_static("application/octet-stream"))),
         (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
         (
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
+            HeaderValue::from_static(if pictures {
                 "default-src 'none'; img-src http: https: data: 'self'; style-src 'unsafe-inline'; font-src data:; \
-                 sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox",
-            ),
+                 sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            } else {
+                "default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline'; font-src data:; \
+                 sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            }),
         ),
     ]
 }
@@ -287,6 +304,9 @@ struct ViewOptions {
     /// "text" for the plain-text version, "source" for the raw message; otherwise the formatted one.
     #[serde(default)]
     view: String,
+    /// Let the message fetch its pictures from the sender's servers.
+    #[serde(default)]
+    pictures: bool,
 }
 
 async fn message_html(
@@ -294,6 +314,7 @@ async fn message_html(
     Path(id): Path<i64>,
     Query(options): Query<ViewOptions>,
 ) -> Api<Response> {
+    let pictures = options.pictures;
     let html = blocking(move || {
         Ok(app.db.raw_body(id)?.map(|raw| match options.view.as_str() {
             "text" => mime::render_text(&raw),
@@ -303,7 +324,36 @@ async fn message_html(
     })
     .await?;
     let html = html.ok_or_else(not_found)?;
-    Ok((untrusted("text/html; charset=utf-8"), html).into_response())
+    Ok((untrusted_page("text/html; charset=utf-8", pictures), html).into_response())
+}
+
+/// Leave a mailing list by the sender's own one-click address, and remember having done so.
+async fn unsubscribe(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<StatusCode> {
+    let logger = app.clone();
+    blocking(move || {
+        let raw = app.db.raw_body(id)?.ok_or_else(|| anyhow::anyhow!("That message isn't stored yet."))?;
+        let sender = facts::unsubscribe_now(&raw)?;
+        app.log(&format!("unsubscribed from {sender}"));
+        app.db.mark_unsubscribed(&sender)
+    })
+    .await
+    .map_err(|e| {
+        logger.log(&format!("unsubscribe failed: {}", e.1));
+        ApiError(StatusCode::BAD_GATEWAY, e.1)
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct PictureSender {
+    sender: String,
+    allow: bool,
+}
+
+/// Always (or no longer) show pictures in mail from one sender.
+async fn picture_sender(State(app): State<Arc<App>>, Json(body): Json<PictureSender>) -> Api<StatusCode> {
+    blocking(move || app.db.set_picture_sender(&body.sender, body.allow)).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn message_parts(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<Json<mime::Parts>> {
@@ -524,6 +574,8 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/thread/:account/:thrid/action", post(thread_action))
         .route("/api/message/:id/html", get(message_html))
         .route("/api/message/:id/parts", get(message_parts))
+        .route("/api/message/:id/unsubscribe", post(unsubscribe))
+        .route("/api/pictures", post(picture_sender))
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/unarchive", post(unarchive))

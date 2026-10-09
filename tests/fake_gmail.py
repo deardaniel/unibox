@@ -68,9 +68,15 @@ def auth_results(frm, to, auth):
     return ("Authentication-Results: mx.google.com;\r\n       " + ";\r\n       ".join(lines) + "\r\n").encode()
 
 
-def build(frm, to, subject, when, text=None, html=None, attach=None, inline=False, extra=(), auth="pass", reply_to=None):
+def build(frm, to, subject, when, text=None, html=None, attach=None, inline=False, extra=(), auth="pass", reply_to=None,
+          headers=(), calendar=None, human=False):
     m = EmailMessage()
     m["From"], m["To"], m["Subject"] = frm, to, subject
+    if human:
+        # what tells the app a person wrote this in a mail program
+        m["Message-ID"] = f"<CAF{when}{abs(hash(subject)) % 10000}@mail.gmail.com>"
+    for name, value in headers:
+        m[name] = value
     if reply_to:
         m["Reply-To"] = reply_to
     m["Date"] = format_datetime(datetime.fromtimestamp(when, timezone.utc))
@@ -79,6 +85,8 @@ def build(frm, to, subject, when, text=None, html=None, attach=None, inline=Fals
         m.add_alternative(html, subtype="html")
         if inline:
             m.get_payload()[1].add_related(PNG, "image", "png", cid="<chart1@fake>")
+    if calendar:
+        m.add_alternative(calendar, subtype="calendar", params={"method": "REQUEST"})
     if attach:
         m.add_attachment(attach[1], maintype="application", subtype="pdf", filename=attach[0])
     for name, data, (main, sub) in extra:
@@ -100,7 +108,7 @@ def mailbox(owner):
         out.append(Msg(n, thrid, build(when=when, **kw), when, **flags))
 
     if owner.startswith("work"):
-        add(1, 0.3, frm="Priya Raman <priya@example.com>", subject="Q4 planning doc",
+        add(1, 0.3, frm="Priya Raman <priya@example.com>", subject="Q4 planning doc", human=True,
             html="<p>Hi,</p><p>Draft is <a href='https://example.com/doc'>here</a>. Comments by Friday please.</p>")
         add(2, 5, frm="Build Bot <ci@example.com>", subject="[ci] main is green", text="All 412 tests passed.", seen=True)
         add(3, 30, frm="HR <hr@example.com>", subject="Benefits enrolment closes soon", seen=True,
@@ -112,19 +120,22 @@ def mailbox(owner):
         return out
 
     # A conversation: an old archived message, a reply the owner sent, and two in the inbox.
-    add(1, 50, frm="Aoife Byrne <aoife@example.com>", subject="Dinner on Saturday?", inbox=False, seen=True,
+    add(1, 50, frm="Aoife Byrne <aoife@example.com>", subject="Dinner on Saturday?", inbox=False, seen=True, human=True,
         text="Are you two free on Saturday? Thinking of that place in Ginza.")
     add(1, 49, frm=f"Me <{owner}>", to="Aoife Byrne <aoife@example.com>", subject="Re: Dinner on Saturday?",
         inbox=False, seen=True, text="Yes! 7pm works. I'll book.")
-    add(1, 3, frm="Aoife Byrne <aoife@example.com>", subject="Re: Dinner on Saturday?", seen=True,
+    add(1, 3, frm="Aoife Byrne <aoife@example.com>", subject="Re: Dinner on Saturday?", seen=True, human=True,
         text="Perfect. Can you make it for five? Niamh is in town.")
-    add(1, 0.2, frm="Niamh Byrne <niamh@example.com>", subject="Re: Dinner on Saturday?",
+    add(1, 0.2, frm="Niamh Byrne <niamh@example.com>", subject="Re: Dinner on Saturday?", human=True,
         html="<div>See you all there &#127843;</div><blockquote>Perfect. Can you make it for five?</blockquote>")
     add(2, 1, frm="Matt Levine <noreply@news.example.com>", subject="Money Stuff: Fake Newsletter Edition",
+        headers=[("List-Unsubscribe", "<https://news.example.com/unsubscribe/abc123>, <mailto:leave@news.example.com?subject=unsubscribe>"),
+                 ("List-Unsubscribe-Post", "List-Unsubscribe=One-Click"), ("List-ID", "<moneystuff.news.example.com>")],
         html="""<html><head><style>.h{font:700 28px Georgia,serif}</style></head><body style="background:#ffffff">
         <table width="600" align="center" cellpadding="0" cellspacing="0"><tr><td>
         <div class="h">Money Stuff</div><p style="color:#333">Everything is <b>securities fraud</b>, again.</p>
         <p><img src="cid:chart1@fake" width="64" height="32" alt="chart"></p>
+        <p><img src="https://dummyimage.com/560x90/5b2ee8/ffffff.png&text=A+picture+from+the+sender" width="560" height="90" alt="banner"></p>
         <img src="https://tracker.invalid/open.gif" width="1" height="1">
         <script>document.title = "pwned"</script>
         <p><a href="https://example.com/article" onclick="steal()">Read on the web</a></p>
@@ -145,6 +156,37 @@ def mailbox(owner):
         <p>Or visit <a href="https://example.com/help">our help page</a>.</p>""")
     add(6, 4, frm="Corner Bakery <hello@cornerbakery.example>", subject="This week's bread", auth="via",
         text="Sourdough on Thursday, focaccia on Friday. https://cornerbakery.example/menu")
+    # Things a message says about itself: a Google Group passing on someone's mail, an
+    # invitation, a flight booking described for mail programs.
+    add(7, 1.5, frm="\"'Claire Byrne' via Kids\" <kids@family.example>", subject="School photos on Friday",
+        reply_to="Claire Byrne <claire@webmail.example>", text="Remember the uniforms! Photos are at 9.",
+        headers=[("X-Original-Sender", "claire@webmail.example"), ("X-Original-From", "Claire Byrne <claire@webmail.example>"),
+                 ("X-Original-Authentication-Results", "mx.google.com;       dkim=pass header.i=@webmail.example header.s=s1;       "
+                  "spf=pass (google.com: domain of claire@webmail.example designates 192.0.2.7 as permitted sender) "
+                  "smtp.mailfrom=claire@webmail.example;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=webmail.example"),
+                 ("Mailing-list", "list kids@family.example; contact kids+owners@family.example"), ("X-Google-Group-Id", "1234567"),
+                 ("List-ID", "<kids.family.example>"), ("List-Post", "<mailto:kids@family.example>"), ("Precedence", "list"),
+                 ("List-Unsubscribe", "<mailto:googlegroups-manage+1234567+unsubscribe@googlegroups.com>")])
+    add(8, 2.5, frm="Aoife Byrne <aoife@example.com>", subject="Invitation: Hanami picnic", human=True,
+        text="You have been invited to Hanami picnic.", calendar="\r\n".join([
+            "BEGIN:VCALENDAR", "PRODID:-//Fake//EN", "VERSION:2.0", "METHOD:REQUEST", "BEGIN:VEVENT",
+            "DTSTART;TZID=Europe/Dublin:20270403T110000", "DTEND;TZID=Europe/Dublin:20270403T140000",
+            "ORGANIZER;CN=Aoife Byrne:mailto:aoife@example.com", "UID:hanami-1@fake",
+            f"ATTENDEE;PARTSTAT=NEEDS-ACTION;CN=Me:mailto:{owner}", "ATTENDEE;PARTSTAT=ACCEPTED;CN=Niamh Byrne:mailto:niamh@example.com",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:conor@example.com",
+            "SUMMARY:Hanami picnic", "LOCATION:Yoyogi Park\\, west gate", "END:VEVENT", "END:VCALENDAR", ""]))
+    add(9, 7, frm="Example Air <bookings@air.example>", subject="Your trip to Dublin is confirmed", html="""
+        <div itemscope itemtype="http://schema.org/FlightReservation"><meta itemprop="reservationNumber" content="K7QF2M"/>
+        <div itemprop="underName" itemscope itemtype="http://schema.org/Person"><meta itemprop="name" content="Dan Byrne"/></div>
+        <div itemprop="reservationFor" itemscope itemtype="http://schema.org/Flight"><meta itemprop="flightNumber" content="42"/>
+        <div itemprop="airline" itemscope itemtype="http://schema.org/Airline"><meta itemprop="name" content="Example Air"/><meta itemprop="iataCode" content="EX"/></div>
+        <div itemprop="departureAirport" itemscope itemtype="http://schema.org/Airport"><meta itemprop="name" content="Tokyo Haneda"/><meta itemprop="iataCode" content="HND"/></div>
+        <meta itemprop="departureTime" content="2026-12-20T10:40:00+09:00"/>
+        <div itemprop="arrivalAirport" itemscope itemtype="http://schema.org/Airport"><meta itemprop="name" content="Dublin"/><meta itemprop="iataCode" content="DUB"/></div>
+        <meta itemprop="arrivalTime" content="2026-12-20T17:55:00+00:00"/></div>
+        <div itemprop="potentialAction" itemscope itemtype="http://schema.org/ViewAction">
+        <link itemprop="target" href="https://air.example/trips/K7QF2M"/><meta itemprop="name" content="View trip"/></div></div>
+        <p>Thanks for booking with Example Air. Your confirmation code is <b>K7QF2M</b>.</p>""")
     for i in range(70):
         add(100 + i, 30 + i * 7, frm=f"Sender {i} <sender{i}@example.com>", subject=f"Routine message number {i}",
             text=f"This is the body of routine message {i}. " * 4, seen=i % 3 != 0)

@@ -54,6 +54,8 @@ pub struct MessageRow {
     pub in_inbox: bool,
     pub has_body: bool,
     pub attachments: serde_json::Value,
+    /// What the message says about itself: mailing list, group, event, booking (see `facts`).
+    pub facts: serde_json::Value,
 }
 
 /// Header-level facts about a message, as found on the server.
@@ -143,7 +145,9 @@ impl Db {
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                role TEXT NOT NULL,
                content TEXT NOT NULL,
-               at INTEGER NOT NULL);",
+               at INTEGER NOT NULL);
+             -- Senders whose lists were left with the Unsubscribe button.
+             CREATE TABLE IF NOT EXISTS unsubscribed(sender TEXT PRIMARY KEY, at INTEGER NOT NULL);",
         )?;
         let has_column = |name: &str| -> Result<bool> {
             let mut st = c.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name=?")?;
@@ -152,6 +156,11 @@ impl Db {
         if !has_column("attachments")? {
             // JSON list of attachments, filled in when the body is stored
             c.execute("ALTER TABLE messages ADD COLUMN attachments TEXT", [])?;
+        }
+        if !has_column("facts")? {
+            // JSON from `facts`, and whether a system rather than a person sent the message
+            c.execute("ALTER TABLE messages ADD COLUMN facts TEXT", [])?;
+            c.execute("ALTER TABLE messages ADD COLUMN automated INTEGER", [])?;
         }
         Ok(db)
     }
@@ -248,9 +257,7 @@ impl Db {
         account_id: i64,
         gm_msgid: &str,
         raw: &[u8],
-        snippet: &str,
-        body_text: &str,
-        attachments: &str,
+        s: &crate::mime::Summary,
     ) -> Result<()> {
         let id: Option<i64> = c
             .query_row(
@@ -261,11 +268,8 @@ impl Db {
             .optional()?;
         let Some(id) = id else { return Ok(()) };
         c.execute("INSERT OR REPLACE INTO bodies(message_id, raw) VALUES(?,?)", params![id, raw])?;
-        c.execute(
-            "UPDATE messages SET has_body=1, snippet=?, body_text=?, attachments=?, has_attach=? WHERE id=?",
-            params![snippet, body_text, attachments, attachments != "[]", id],
-        )?;
-        Ok(())
+        c.execute("UPDATE messages SET has_body=1 WHERE id=?", [id])?;
+        Db::set_summary(c, id, s)
     }
 
     pub fn raw_body(&self, message_id: i64) -> Result<Option<Vec<u8>>> {
@@ -283,6 +287,7 @@ impl Db {
         account: Option<i64>,
         query: &str,
         unread_only: bool,
+        people_only: bool,
         keep: &str,
         limit: i64,
         offset: i64,
@@ -305,12 +310,13 @@ impl Db {
                        WHERE s.account_id=m.account_id AND s.gm_thrid=m.gm_thrid
                          AND (s.subject LIKE ?2 OR s.from_name LIKE ?2 OR s.from_addr LIKE ?2 OR s.body_text LIKE ?2)))
               GROUP BY account_id, gm_thrid
-             HAVING ?5=0 OR SUM(seen=0)>0
-                    OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?6))
+             HAVING (?5=0 OR SUM(seen=0)>0
+                     OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?6)))
+                AND (?7=0 OR SUM(COALESCE(automated, 0)=0)>0)
               ORDER BY newest DESC
               LIMIT ?3 OFFSET ?4",
         )?;
-        let rows = st.query_map(params![account, like, limit, offset, unread_only, keep], |r| {
+        let rows = st.query_map(params![account, like, limit, offset, unread_only, keep, people_only], |r| {
             Ok(ThreadRow {
                 account_id: r.get(0)?,
                 thrid: r.get(1)?,
@@ -334,7 +340,7 @@ impl Db {
         let c = self.conn()?;
         let mut st = c.prepare(
             "SELECT id, date, from_name, from_addr, to_addrs, cc_addrs, subject, snippet, seen, starred, in_inbox,
-                    has_body, attachments
+                    has_body, attachments, facts
                FROM messages WHERE account_id=? AND gm_thrid=? ORDER BY date, id",
         )?;
         let rows = st.query_map(params![account_id, thrid], |r| {
@@ -355,6 +361,10 @@ impl Db {
                     .get::<_, Option<String>>(12)?
                     .and_then(|j| serde_json::from_str(&j).ok())
                     .unwrap_or_else(|| serde_json::json!([])),
+                facts: r
+                    .get::<_, Option<String>>(13)?
+                    .and_then(|j| serde_json::from_str(&j).ok())
+                    .unwrap_or_else(|| serde_json::json!({})),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -419,13 +429,49 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Replace what was derived from a stored body (preview, search text, attachment list).
-    pub fn set_summary(c: &Connection, message_id: i64, snippet: &str, body_text: &str, attachments: &str) -> Result<()> {
+    /// Replace what was derived from a stored body (preview, search text, attachment list, facts).
+    pub fn set_summary(c: &Connection, message_id: i64, s: &crate::mime::Summary) -> Result<()> {
         c.execute(
-            "UPDATE messages SET snippet=?, body_text=?, attachments=?, has_attach=? WHERE id=?",
-            params![snippet, body_text, attachments, attachments != "[]", message_id],
+            "UPDATE messages SET snippet=?, body_text=?, attachments=?, has_attach=?, facts=?, automated=? WHERE id=?",
+            params![s.snippet, s.text, s.attachments, s.attachments != "[]", s.facts, s.automated, message_id],
         )?;
+        // A Google Group puts its own name in the From line; list the person who wrote instead.
+        let sender = serde_json::from_str::<serde_json::Value>(&s.facts).ok().map(|f| f["group"].clone());
+        if let Some(g) = sender.filter(|g| g["rewritten"] == true) {
+            let addr = g["sender_addr"].as_str().unwrap_or_default();
+            let name = g["sender_name"].as_str().unwrap_or_default();
+            c.execute("UPDATE messages SET from_name=?, from_addr=? WHERE id=?", params![name, addr, message_id])?;
+        }
         Ok(())
+    }
+
+    // ---- small lists the person builds up ----------------------------------
+    pub fn mark_unsubscribed(&self, sender: &str) -> Result<()> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        self.conn()?.execute("INSERT OR REPLACE INTO unsubscribed(sender, at) VALUES(?,?)", params![sender.to_lowercase(), now])?;
+        Ok(())
+    }
+
+    pub fn unsubscribed(&self) -> Result<std::collections::HashSet<String>> {
+        let c = self.conn()?;
+        let mut st = c.prepare("SELECT sender FROM unsubscribed")?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Senders whose pictures are always shown.
+    pub fn picture_senders(&self) -> Result<Vec<String>> {
+        Ok(self.meta("picture_senders")?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default())
+    }
+
+    pub fn set_picture_sender(&self, sender: &str, allow: bool) -> Result<()> {
+        let sender = sender.to_lowercase();
+        let mut list = self.picture_senders()?;
+        list.retain(|s| *s != sender);
+        if allow {
+            list.push(sender);
+        }
+        self.set_meta("picture_senders", &serde_json::to_string(&list)?)
     }
 
     // ---- the assistant ---------------------------------------------------
