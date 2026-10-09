@@ -117,6 +117,16 @@ async fn add_account(State(app): State<Arc<App>>, Json(body): Json<NewAccount>) 
     Ok(Json(serde_json::json!({ "id": id })))
 }
 
+#[derive(Deserialize)]
+struct AccountOrder {
+    ids: Vec<i64>,
+}
+
+async fn order_accounts(State(app): State<Arc<App>>, Json(body): Json<AccountOrder>) -> Api<StatusCode> {
+    blocking(move || app.db.set_account_order(&body.ids)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn remove_account(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<StatusCode> {
     blocking(move || {
         if let Some(a) = app.db.account(id)? {
@@ -492,6 +502,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/app.js", get(app_js))
         .route("/style.css", get(style_css))
         .route("/api/accounts", get(list_accounts).post(add_account))
+        .route("/api/accounts/order", post(order_accounts))
         .route("/api/accounts/:id", delete(remove_account))
         .route("/api/threads", get(list_threads))
         .route("/api/thread/:account/:thrid", get(get_thread))

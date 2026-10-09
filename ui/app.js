@@ -144,6 +144,7 @@ function avatar(name, addr, cls = "") {
 // ---- sidebar ---------------------------------------------------------------
 function renderAccounts() {
   const nav = $("#accounts");
+  if (nav.querySelector(".dragging")) return;   // don't rebuild the rows under a drag
   nav.textContent = "";
   const item = (id, name, color, unread, acct) => {
     const b = el("button", "acct" + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : "") + (unread ? "" : " zero"));
@@ -157,7 +158,8 @@ function renderAccounts() {
       rm.onclick = e => { e.stopPropagation(); removeAccount(acct); };
       b.append(rm);
     }
-    b.onclick = () => { setFilter(id); b.blur(); };
+    b.onclick = () => { if (b.dataset.dragged) return delete b.dataset.dragged; setFilter(id); b.blur(); };
+    if (acct) { b.dataset.id = id; b.onpointerdown = e => dragAccount(e, b); }
     nav.append(b);
   };
   item(null, "All inboxes", "#77736b", state.accounts.reduce((n, a) => n + a.unread, 0));
@@ -167,6 +169,45 @@ function renderAccounts() {
   const last = Math.max(0, ...state.accounts.map(a => a.last_sync || 0));
   $("#status").textContent = errs.length ? `Can't sync ${errs.map(a => a.email).join(", ")}`
     : last ? "Synced " + fmtDate(last) : state.accounts.length ? "Syncing…" : "";
+}
+
+// Drag an account up or down the sidebar to reorder it. The rows move as you drag; the order
+// is saved on release (it also decides which account the 1-9 keys pick).
+function dragAccount(down, b) {
+  if (down.button !== 0 || down.target.closest(".rm")) return;
+  const nav = $("#accounts");
+  let dragging = false;
+  const move = e => {
+    if (!dragging) {
+      if (Math.abs(e.clientY - down.clientY) < 5) return;
+      dragging = true;
+      b.setPointerCapture(down.pointerId);
+      b.classList.add("dragging");
+    }
+    for (const o of nav.querySelectorAll(".acct[data-id]")) {
+      if (o === b) continue;
+      const r = o.getBoundingClientRect(), mid = r.top + r.height / 2;
+      const before = o.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;   // o sits above b
+      if (before && e.clientY < mid) { nav.insertBefore(b, o); break; }
+      if (!before && e.clientY > mid) nav.insertBefore(b, o.nextSibling);
+    }
+  };
+  const up = () => {
+    b.removeEventListener("pointermove", move);
+    b.removeEventListener("pointerup", up);
+    b.removeEventListener("pointercancel", up);
+    if (!dragging) return;
+    b.classList.remove("dragging");
+    b.dataset.dragged = 1;                      // swallow the click that follows the release
+    setTimeout(() => delete b.dataset.dragged, 0);
+    const ids = [...nav.querySelectorAll(".acct[data-id]")].map(o => +o.dataset.id);
+    state.accounts.sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id));
+    renderAccounts();
+    api("/api/accounts/order", { body: { ids } }).catch(() => refresh());
+  };
+  b.addEventListener("pointermove", move);
+  b.addEventListener("pointerup", up);
+  b.addEventListener("pointercancel", up);
 }
 
 async function removeAccount(a) {

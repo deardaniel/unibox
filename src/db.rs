@@ -182,7 +182,19 @@ impl Db {
                 unread: r.get(5)?,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut accounts: Vec<Account> = rows.collect::<rusqlite::Result<_>>()?;
+        // The order chosen in the sidebar; accounts it doesn't mention (new ones) go last.
+        let order: Vec<i64> = c
+            .query_row("SELECT value FROM meta WHERE key='account_order'", [], |r| r.get::<_, String>(0))
+            .optional()?
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or_default();
+        accounts.sort_by_key(|a| (order.iter().position(|id| *id == a.id).unwrap_or(usize::MAX), a.id));
+        Ok(accounts)
+    }
+
+    pub fn set_account_order(&self, ids: &[i64]) -> Result<()> {
+        self.set_meta("account_order", &serde_json::to_string(ids)?)
     }
 
     pub fn account(&self, id: i64) -> Result<Option<Account>> {
