@@ -110,7 +110,12 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #list { overflow-y: auto; overflow-x: hidden; outline: none; min-width: 0; display: flex; flex-direction: column; scroll-padding-bottom: 30px; }
 #list > * { flex: none; }
 #list { position: relative; }
-#rows { position: relative; }
+/* Behind the rows, the outline of rows: a scrollbar dragged a long way can show a stretch of
+   the list a moment before its rows are drawn, and this is what is seen there instead of nothing. */
+#rows { position: relative; background:
+          radial-gradient(circle at 30px 26px, color-mix(in srgb, var(--muted) 22%, transparent) 15.5px, transparent 16.5px) 0 0 / 100% var(--row-h, 74px),
+          linear-gradient(to bottom, transparent calc(var(--row-h, 74px) - 1px), var(--line) 0) 0 0 / 100% var(--row-h, 74px),
+          var(--read-bg); }
 #rows .row-t { position: absolute; left: 0; right: 0; box-sizing: border-box; }
 /* how much the list holds: stays at the bottom of the pane, under however many rows there are */
 #list-foot { position: sticky; bottom: 0; z-index: 2; margin-top: auto; display: flex; gap: 10px; align-items: baseline;

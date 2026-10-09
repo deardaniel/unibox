@@ -358,6 +358,7 @@ function renderList() {
   rowHeight = probe.offsetHeight || rowHeight || 70;
   probe.remove();
   box.style.height = state.threads.length * rowHeight + "px";
+  box.style.setProperty("--row-h", rowHeight + "px");
   renderListFoot();
   list.scrollTop = top;
   renderRows();
@@ -368,8 +369,10 @@ function renderRows() {
   const list = $("#list"), box = $("#rows");
   if (!box || !rowHeight) return;
   const y = list.scrollTop - box.offsetTop;
-  const first = Math.max(0, Math.floor(y / rowHeight) - 10);
-  const last = Math.min(state.threads.length, Math.ceil((y + list.clientHeight) / rowHeight) + 10);
+  // a screenful or so spare each way, so ordinary scrolling never outruns the drawing
+  const spare = Math.ceil(list.clientHeight / rowHeight) + 10;
+  const first = Math.max(0, Math.floor(y / rowHeight) - spare);
+  const last = Math.min(state.threads.length, Math.ceil((y + list.clientHeight) / rowHeight) + spare);
   for (const [i, node] of rowNodes) if (i < first || i >= last) { node.remove(); rowNodes.delete(i); }
   for (let i = first; i < last; i++) {
     if (rowNodes.has(i)) continue;
@@ -448,13 +451,10 @@ function moveCursor(delta) {
   if (next) setTimeout(() => ensureView(next), 150);
 }
 
-{
-  // keep the drawn rows up with the scroll position, at most once a frame
-  let queued = false;
-  const redraw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; renderRows(); }); };
-  $("#list").addEventListener("scroll", redraw);
-  new ResizeObserver(redraw).observe($("#list"));
-}
+// Keep the drawn rows up with the scroll position, in the same frame as the scroll (waiting
+// for the next frame is what left a blank pane behind a dragged scrollbar).
+$("#list").addEventListener("scroll", renderRows, { passive: true });
+new ResizeObserver(renderRows).observe($("#list"));
 
 // ---- rendered conversations ----------------------------------------------------
 // A view is a conversation laid out in the pane, with its message frames loaded. Views are
