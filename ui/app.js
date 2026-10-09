@@ -437,7 +437,8 @@ async function loadView(v, peek) {
   const first = !v.messages.length;
   const before = new Map(v.messages.map(m => [m.id, m]));
   v.messages = data.messages;
-  if (first) v.focus = Math.max(0, v.messages.findIndex(m => !m.seen));
+  // a conversation opens at its first unread message, or at the latest one when all are read
+  if (first) { const unread = v.messages.findIndex(m => !m.seen); v.focus = unread >= 0 ? unread : Math.max(0, v.messages.length - 1); }
   const box = v.node.querySelector(".messages");
   // Keep frames that are already showing; only add or fill in what changed.
   v.messages.forEach((m, i) => {
@@ -469,6 +470,14 @@ function show(t) {
     v.ready.then(() => {
       if (state.open !== v) return;
       focusMessage(v.focus, false);
+      // the message is still being laid out and grows as it loads; keep it in place meanwhile,
+      // unless the reader has scrolled somewhere themselves
+      let at = v.node.scrollTop;
+      for (const ms of [120, 350, 800, 1500]) setTimeout(() => {
+        if (state.open !== v || Math.abs(v.node.scrollTop - at) > 2) return;
+        focusMessage(v.focus, false);
+        at = v.node.scrollTop;
+      }, ms);
       loadView(v, false).catch(() => {});   // now also ask Gmail whether there is more
     });
   }
@@ -984,8 +993,9 @@ function focusMessage(i, scroll = true) {
   const node = nodes[v.focus];
   if (!node) return;
   if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); updateThreadBar(); }
-  if (v.focus === 0) { if (scroll) v.node.scrollTo({ top: 0, behavior: "smooth" }); }
-  else node.scrollIntoView({ block: "start", behavior: scroll ? "smooth" : "auto" });
+  // put it at the top of the pane, with the end of the message before it still showing
+  const top = v.focus === 0 ? 0 : node.getBoundingClientRect().top - v.node.getBoundingClientRect().top + v.node.scrollTop - 40;
+  v.node.scrollTo({ top, behavior: scroll ? "smooth" : "auto" });
 }
 
 function updateThreadBar() {
