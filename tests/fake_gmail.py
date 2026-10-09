@@ -51,9 +51,28 @@ class Msg:
         self.uid_inbox = n + 1000
 
 
-def build(frm, to, subject, when, text=None, html=None, attach=None, inline=False, extra=()):
+def auth_results(frm, to, auth):
+    """The verdict header Gmail puts on top of incoming mail. Mail the owner sent has none."""
+    domain = frm.rsplit("@", 1)[-1].strip(">")
+    if auth is None:
+        return b""
+    lines = {
+        "pass": [f"dkim=pass header.i=@{domain} header.s=s1 header.b=AbCd",
+                 f"spf=pass (google.com: domain of bounce@{domain} designates 192.0.2.1 as permitted sender) smtp.mailfrom=bounce@{domain}",
+                 f"dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from={domain}"],
+        "fail": ["spf=softfail (google.com: domain of transitioning x@mailer.invalid does not designate 192.0.2.9 as permitted sender) smtp.mailfrom=x@mailer.invalid",
+                 f"dmarc=fail (p=QUARANTINE sp=QUARANTINE dis=NONE) header.from={domain}"],
+        "via": ["dkim=pass header.i=@bulkmailer.example header.s=s1 header.b=AbCd",
+                "spf=pass (google.com: domain of b@bulkmailer.example designates 192.0.2.5 as permitted sender) smtp.mailfrom=b@bulkmailer.example"],
+    }[auth]
+    return ("Authentication-Results: mx.google.com;\r\n       " + ";\r\n       ".join(lines) + "\r\n").encode()
+
+
+def build(frm, to, subject, when, text=None, html=None, attach=None, inline=False, extra=(), auth="pass", reply_to=None):
     m = EmailMessage()
     m["From"], m["To"], m["Subject"] = frm, to, subject
+    if reply_to:
+        m["Reply-To"] = reply_to
     m["Date"] = format_datetime(datetime.fromtimestamp(when, timezone.utc))
     m.set_content(text or "See the HTML version.")
     if html:
@@ -64,7 +83,7 @@ def build(frm, to, subject, when, text=None, html=None, attach=None, inline=Fals
         m.add_attachment(attach[1], maintype="application", subtype="pdf", filename=attach[0])
     for name, data, (main, sub) in extra:
         m.add_attachment(data, maintype=main, subtype=sub, filename=name)
-    return m.as_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    return auth_results(frm, to, auth) + m.as_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
 
 
 def mailbox(owner):
@@ -76,6 +95,8 @@ def mailbox(owner):
         flags = {k: kw.pop(k) for k in ("inbox", "seen", "starred") if k in kw}
         when = NOW - int(hours_ago * 3600)
         kw.setdefault("to", owner)
+        if owner in kw["frm"]:
+            kw["auth"] = None   # mail the owner sent was never checked on the way in
         out.append(Msg(n, thrid, build(when=when, **kw), when, **flags))
 
     if owner.startswith("work"):
@@ -115,6 +136,15 @@ def mailbox(owner):
         extra=[("receipt.png", png(3000, 4000, (60, 140, 220)), ("image", "png")),
                ("items.csv", b"item,qty,price\nwidget,2,19.99\n<script>alert(1)</script>,1,0\n", ("text", "csv")),
                ("archive.zip", b"PK\x03\x04 not really", ("application", "zip"))])
+    # Sender trust: one Gmail could not verify (with a link that lies about where it goes),
+    # one that only the bulk mailer vouches for.
+    add(5, 2, frm='"service@paypa1.example" <service@paypa1.example>', subject="Your account has been limited",
+        auth="fail", reply_to="Account Review <review@collect.example>",
+        html="""<p>We noticed unusual activity. Confirm your details within 24 hours:</p>
+        <p><a href="https://login.collect.example/verify?id=81">https://www.paypal.com/signin</a></p>
+        <p>Or visit <a href="https://example.com/help">our help page</a>.</p>""")
+    add(6, 4, frm="Corner Bakery <hello@cornerbakery.example>", subject="This week's bread", auth="via",
+        text="Sourdough on Thursday, focaccia on Friday. https://cornerbakery.example/menu")
     for i in range(70):
         add(100 + i, 30 + i * 7, frm=f"Sender {i} <sender{i}@example.com>", subject=f"Routine message number {i}",
             text=f"This is the body of routine message {i}. " * 4, seen=i % 3 != 0)

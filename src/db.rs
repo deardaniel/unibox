@@ -394,6 +394,14 @@ impl Db {
         Ok(out)
     }
 
+    /// The first `len` bytes of a stored message: its headers, without loading a large body.
+    pub fn message_head(&self, message_id: i64, len: i64) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .conn()?
+            .query_row("SELECT substr(raw, 1, ?) FROM bodies WHERE message_id=?", params![len, message_id], |r| r.get(0))
+            .optional()?)
+    }
+
     pub fn meta(&self, key: &str) -> Result<Option<String>> {
         Ok(self.conn()?.query_row("SELECT value FROM meta WHERE key=?", [key], |r| r.get(0)).optional()?)
     }

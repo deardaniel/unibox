@@ -7,6 +7,7 @@ mod imap;
 mod mime;
 mod secrets;
 mod sync;
+mod trust;
 
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
@@ -250,7 +251,15 @@ async fn get_thread(
         });
     }
     let out = blocking(move || {
-        Ok(serde_json::json!({ "messages": app.db.thread_messages(account_id, &thrid)? }))
+        let mut messages = Vec::new();
+        for m in app.db.thread_messages(account_id, &thrid)? {
+            // what Gmail made of the sender, read from the top of the stored message
+            let head = if m.has_body { app.db.message_head(m.id, 65536)? } else { None };
+            let mut row = serde_json::to_value(&m)?;
+            row["trust"] = serde_json::to_value(head.map(|h| trust::assess(&h)))?;
+            messages.push(row);
+        }
+        Ok(serde_json::json!({ "messages": messages }))
     })
     .await?;
     Ok(Json(out))

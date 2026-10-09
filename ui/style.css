@@ -1,14 +1,14 @@
 :root {
   --bg: #f6f5f2; --panel: #fff; --ink: #1c1c1c; --muted: #6b6b6b; --line: #e4e2dd;
   --hover: #f0eee9; --cursor: #5b2ee8; --accent: #5b2ee8; --unread-bg: #fff; --read-bg: #f3f2ee;
-  --danger: #c0392b; --rail: 50px;
+  --danger: #c0392b; --ok: #2e7d4f; --warn: #a86400; --rail: 50px;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #131313; --panel: #000; --ink: #ececec; --muted: #9a9a9a; --line: #2a2a2a;
     --hover: #1f1f1f; --cursor: #a48bff; --accent: #a48bff; --unread-bg: #1a1a1a; --read-bg: #101010;
-    --danger: #ff7b6b;
+    --danger: #ff7b6b; --ok: #5fbf8a; --warn: #e0a84a;
   }
   /* Emails are light-only HTML: flip the frame, and its images get flipped back from inside. */
   iframe.body { filter: invert(1) hue-rotate(180deg); }
@@ -109,7 +109,7 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 @keyframes spin { to { transform: rotate(360deg); } }
 #work { flex: 1; min-height: 0; position: relative; display: flex; }
 #list { overflow-y: auto; overflow-x: hidden; outline: none; min-width: 0; }
-#pane { display: flex; flex-direction: column; min-width: 0; }
+#pane { display: flex; flex-direction: column; min-width: 0; position: relative; }
 
 /* The list, with the reading pane beside it. */
 #list { flex: none; width: var(--list-w, 430px); }
@@ -232,8 +232,39 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .msg > header { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; cursor: pointer; }
 .msg .who { flex: 1; min-width: 0; line-height: 1.35; }
 .msg .top { display: flex; align-items: baseline; gap: 12px; }
-.msg .from { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg .from { flex: 1; min-width: 0; font-weight: 600; display: flex; align-items: baseline; }
+.msg .from .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg .addr { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+.msg .trust { flex: none; align-self: center; border: 0; background: none; padding: 0 0 0 6px; cursor: pointer; color: var(--muted); height: auto; }
+.msg .trust svg { display: block; width: 15px; height: 15px; }
+.msg .trust.verified { color: var(--ok); opacity: .75; }
+.msg .trust.unverified { color: var(--warn); }
+.msg .trust.failed { color: var(--danger); }
+.msg .trust:hover { opacity: 1; filter: brightness(.85); }
+.msg .replies.warn { color: var(--warn); }
+.msg.closed .caution { display: none; }
+.caution { margin: 0 14px 10px; padding: 8px 12px; border-radius: 6px; font-size: 13px; line-height: 1.45;
+           color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent);
+           border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
+.menu button.sep { border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; margin-top: 4px; padding-top: 8px; }
+#link-status { position: absolute; left: 0; bottom: 0; z-index: 3; max-width: min(100%, 760px); padding: 3px 10px;
+               font-size: 12px; color: var(--muted); background: var(--bg); border: 1px solid var(--line);
+               border-width: 1px 1px 0 0; border-radius: 0 6px 0 0; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; pointer-events: none; }
+#link-status.lie { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; }
+#trust-dialog { width: min(560px, 92vw); }
+#trust-dialog .verdict { color: var(--ink); font-weight: 600; }
+#trust-dialog .verdict.verified { color: var(--ok); }
+#trust-dialog .verdict.unverified { color: var(--warn); }
+#trust-dialog .verdict.failed { color: var(--danger); }
+#trust-dialog td:first-child { color: var(--muted); white-space: nowrap; }
+#trust-dialog td { overflow-wrap: anywhere; }
+#trust-dialog td.warn { color: var(--warn); }
+#trust-dialog td.bad { color: var(--danger); }
+#trust-dialog .note { font-size: 12.5px; }
+#trust-dialog summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+#trust-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, Consolas, monospace;
+                    color: var(--muted); margin: 8px 0 14px; }
 .msg .to, .msg .meta { color: var(--muted); font-size: 12.5px; }
 .msg .to { overflow-wrap: anywhere; }
 .msg .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

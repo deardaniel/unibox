@@ -41,6 +41,7 @@
         <button data-act="window" title="Open this conversation in its own window (Shift+Enter, or Ctrl+click it in the list)">Open in window</button>
       </div>
       <!-- One .view per conversation; several are kept rendered so opening is instant. -->
+      <div id="link-status" hidden></div>
       <div id="views"><div id="pane-empty">Select a conversation to read it here.</div></div>
     </section>
 
@@ -85,6 +86,12 @@
       <button type="submit" id="add-submit" class="primary">Add account</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="trust-dialog">
+  <h2>Is this sender genuine?</h2>
+  <div class="body"></div>
+  <form method="dialog" class="row"><button class="primary">Close</button></form>
 </dialog>
 
 <dialog id="help-dialog">

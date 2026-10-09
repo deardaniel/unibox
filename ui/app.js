@@ -37,6 +37,9 @@ const key = t => t.account_id + ":" + t.thrid;
 const ICONS = {
   more: '<circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/>',
   key: '<circle cx="5" cy="11" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 9l6-6M10.5 5.5l2 2M12.6 3.4l1.2 1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  verified: '<path d="M8 1.5 13.5 3.6v4.1c0 3.3-2.2 5.7-5.5 6.8-3.3-1.1-5.5-3.5-5.5-6.8V3.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.6 8.1 7.4 9.9 10.6 6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  unverified: '<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.2 6.4a1.9 1.9 0 1 1 2.6 1.8c-.5.3-.8.6-.8 1.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9"/>',
+  failed: '<path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.4v3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9"/>',
   save: '<path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function icon(name) {
@@ -474,8 +477,20 @@ function renderMessage(v, m, open) {
   const node = el("article", "msg" + (open ? "" : " closed"));
   node.dataset.id = m.id;
   const head = el("header");
-  const from = el("div", "from", m.from_name || m.from_addr || "(unknown)");
-  if (m.from_name) from.append(el("span", "addr", "  " + m.from_addr));
+  // the name may be cut short to fit; the badge after it never is
+  const from = el("div", "from");
+  const name = el("span", "name", m.from_name || m.from_addr || "(unknown)");
+  if (m.from_name) name.append(el("span", "addr", "  " + m.from_addr));
+  from.append(name);
+  // Gmail's verdict on whether the sender is who the From line says.
+  const tr = m.trust && m.trust.level !== "none" ? m.trust : null;
+  if (tr) {
+    const badge = el("button", "trust " + tr.level);
+    badge.append(icon(tr.level));
+    badge.title = tr.summary + " Click for details.";
+    badge.onclick = e => { e.stopPropagation(); senderDetails(m); };
+    from.append(badge);
+  }
   // Second line: who it went to when open, a preview of the text when collapsed.
   // The date shares the sender's line, so the two sit on one baseline.
   const top = el("div", "top");
@@ -485,10 +500,18 @@ function renderMessage(v, m, open) {
   more.onclick = e => { e.stopPropagation(); messageMenu(more, node, m); };
   top.append(from, el("span", "when", fmtDate(m.date, true)), more);
   const who = el("div", "who");
-  who.append(top, el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", ")), el("div", "meta", m.snippet));
+  const to = el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", "));
+  if (m.trust?.reply_to) to.append(el("span", "replies" + (tr?.level === "verified" ? "" : " warn"), " · replies go to " + m.trust.reply_to));
+  who.append(top, to, el("div", "meta", m.snippet));
   head.append(avatar(m.from_name, m.from_addr, "big"), who);
   head.onclick = () => { node.classList.toggle("closed"); if (!node.classList.contains("closed")) fill(node, m); };
-  node.append(head, el("div", "content"));
+  node.append(head);
+  // Say it in words when something is wrong; a small icon is too easy to miss.
+  const problems = [];
+  if (tr?.level === "failed") problems.push(tr.summary);
+  if (m.trust?.name_address) problems.push(`The sender's name shows ${m.trust.name_address}, but this was sent from ${m.from_addr}.`);
+  if (problems.length) node.append(el("div", "caution", problems.join(" ")));
+  node.append(el("div", "content"));
   if (open) fill(node, m);
   return node;
 }
@@ -509,12 +532,72 @@ async function messageMenu(anchor, node, m) {
   item("html", "Formatted", !!parts);
   item("text", "Plain text", !!parts?.text);
   item("source", "Original message", !!parts);
+  if (m.trust) {
+    const b = el("button", "sep", "Sender details…");
+    b.onclick = () => { menu.remove(); senderDetails(m); };
+    menu.append(b);
+  }
   document.body.append(menu);
   const r = anchor.getBoundingClientRect();
   menu.style.top = r.bottom + 4 + "px";
   menu.style.left = Math.max(8, r.right - menu.offsetWidth) + "px";
   const close = e => { if (!menu.contains(e.target)) { menu.remove(); removeEventListener("pointerdown", close, true); } };
   addEventListener("pointerdown", close, true);
+}
+
+/** Everything known about whether a message's sender is genuine. */
+function senderDetails(m) {
+  const t = m.trust, d = $("#trust-dialog");
+  const words = { pass: "Passed", fail: "Failed", softfail: "Failed (soft)", none: "Not set up by the sender", neutral: "Inconclusive",
+    temperror: "Couldn't be checked", permerror: "Sender's record is broken", policy: "Rejected by policy" };
+  const say = r => words[r] || r || "No result";
+  const body = d.querySelector(".body");
+  body.textContent = "";
+  const none = t.level === "none";
+  body.append(el("p", "verdict " + t.level, none
+    ? "Gmail recorded no check for this message. That is normal for mail you sent yourself."
+    : t.summary));
+  const table = el("table");
+  const row = (k, v, cls) => { const r = el("tr"); r.append(el("td", "", k), el("td", cls || "", v)); table.append(r); };
+  row("From", m.from_name ? `${m.from_name} <${m.from_addr}>` : m.from_addr);
+  if (t.reply_to) row("Replies go to", t.reply_to, "warn");
+  if (t.name_address) row("Name claims", t.name_address, "warn");
+  if (!none) {
+    const policy = { none: "the domain asks for failing mail to be delivered anyway", quarantine: "the domain asks for failing mail to be treated as spam",
+      reject: "the domain asks for failing mail to be refused" }[t.dmarc_policy];
+    row("DMARC", say(t.dmarc) + (t.dmarc ? (t.dmarc === "fail" && policy ? `; ${policy}` : "") : " (the domain publishes no policy)"),
+      t.dmarc === "fail" && !t.forwarded ? "bad" : "");
+    if (t.forwarded) row("Forwarded", "Yes. It passed these checks where it first arrived.");
+    for (const k of t.dkim) row("DKIM signature", `${say(k.result)}, signed by ${k.domain || "?"}`, k.result === "fail" ? "bad" : "");
+    if (!t.dkim.length) row("DKIM signature", "None");
+    row("SPF", say(t.spf) + (t.spf_domain ? `, for ${t.spf_domain}` : ""), /fail/.test(t.spf) ? "bad" : "");
+  }
+  body.append(table);
+  if (!none) {
+    body.append(el("p", "note", "These are Gmail's own checks, recorded when the message arrived. A pass means the message "
+      + `really came from ${t.domain || "that domain"}; it says nothing about whether that domain is one you should trust, so read it carefully.`));
+    const raw = el("details");
+    raw.append(el("summary", "", "Gmail's record"), el("pre", "", t.raw.replace(/;\s*/g, ";\n  ")));
+    body.append(raw);
+  }
+  d.showModal();
+}
+
+// Where a link really goes, shown along the bottom of the reading pane while pointing at it
+// (email code never runs, so the page itself cannot fake this). A link whose text is a web
+// address for somewhere else is called out: that is the classic phishing trick.
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+function linkStatus(a) {
+  const bar = $("#link-status");
+  if (!a) { bar.hidden = true; return; }
+  const text = a.textContent.trim();
+  const looksLikeUrl = /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(text);
+  const shown = looksLikeUrl ? host(/^https?:/i.test(text) ? text : "https://" + text) : "";
+  const real = /^https?:/i.test(a.href) ? host(a.href) : "";
+  const lie = shown && real && shown !== real && !real.endsWith("." + shown) && !shown.endsWith("." + real);
+  bar.textContent = lie ? `Says ${shown} but goes to ${a.href}` : a.href.replace(/^mailto:/i, "Email ");
+  bar.classList.toggle("lie", !!lie);
+  bar.hidden = false;
 }
 
 function setMessageView(node, m, view) {
@@ -565,6 +648,8 @@ function fill(node, m) {
       e.preventDefault();
       if (/^(https?:|mailto:)/i.test(a.href)) openExternal(a.href);
     });
+    doc.addEventListener("mouseover", e => linkStatus(e.target.closest?.("a[href]")));
+    root.addEventListener("mouseleave", () => linkStatus(null));
     // Keyboard shortcuts keep working after clicking inside a message.
     doc.addEventListener("keydown", e => onKey(e));
   };
