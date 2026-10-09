@@ -78,8 +78,8 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 /* The sync button's border fills clockwise as the next automatic check approaches.
    --p is how far along the wait is, 0 to 1. */
 @property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
-#sync { display: flex; align-items: center; gap: 6px; width: 104px; justify-content: center; white-space: nowrap;
-        border: 2px solid transparent; padding: 4px 10px; transition: --p 1s linear;
+#sync { display: flex; align-items: center; justify-content: center; width: 34px; padding: 0; font-size: 16px;
+        border: 1px solid transparent; transition: --p 1s linear;
         background: linear-gradient(var(--panel), var(--panel)) padding-box,
                     conic-gradient(var(--accent) calc(var(--p) * 360deg), var(--line) 0) border-box; }
 #sync:hover { background: linear-gradient(var(--hover), var(--hover)) padding-box,

@@ -681,11 +681,10 @@ function renderSync() {
   const busy = sync.syncing || left === 0;
   const b = $("#sync");
   b.classList.toggle("busy", busy);
-  b.querySelector(".what").textContent = busy ? "Syncing…" : "Sync";
   // The border fills as the wait runs down; while syncing it is empty and the arrow spins.
   b.style.setProperty("--p", busy ? 0 : Math.min(1, 1 - (left - 1) / sync.every));
   const s = Math.ceil(left);
-  b.title = busy ? "Checking Gmail for new mail and changes"
+  b.title = busy ? "Syncing: checking Gmail for new mail and changes"
     : `Next automatic check in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}. Click to check now.`;
 }
 function setSync(s) { Object.assign(sync, s); renderSync(); }
