@@ -19,7 +19,6 @@
 <main>
   <header id="top">
     <input id="search" type="search" placeholder="Search the inbox  ( / )" autocomplete="off" spellcheck="false">
-    <button id="layout" title="Switch between the reading pane and a full-width list"></button>
     <button id="sync" aria-label="Sync"><span class="spin">↻</span></button>
     <button id="help" title="Keyboard shortcuts (?)">?</button>
   </header>
@@ -29,7 +28,6 @@
 
     <section id="pane">
       <div id="thread-bar">
-        <button data-act="back" title="Back to inbox (u)">← Inbox</button>
         <button data-act="archive" title="Archive (e)">Archive</button>
         <button data-act="unread" title="Mark as unread (Shift+U)">Mark unread</button>
         <button data-act="star" title="Star (s)">Star</button>
@@ -61,9 +59,9 @@
   <h2>Keyboard shortcuts</h2>
   <table>
     <tr><td><kbd>j</kbd> <kbd>k</kbd> or <kbd>↓</kbd> <kbd>↑</kbd></td><td>Next / previous conversation</td></tr>
-    <tr><td><kbd>o</kbd> or <kbd>Enter</kbd></td><td>Open conversation</td></tr>
+    <tr><td><kbd>o</kbd> or <kbd>Enter</kbd></td><td>Open conversation now</td></tr>
     <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd> or <kbd>Ctrl</kbd>+click</td><td>Open conversation in its own window</td></tr>
-    <tr><td><kbd>u</kbd> or <kbd>Esc</kbd></td><td>Back to the inbox</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Clear the selection</td></tr>
     <tr><td><kbd>n</kbd> <kbd>p</kbd></td><td>Next / previous message in a conversation</td></tr>
     <tr><td><kbd>e</kbd></td><td>Archive</td></tr>
     <tr><td><kbd>s</kbd></td><td>Star or unstar</td></tr>

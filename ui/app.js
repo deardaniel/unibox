@@ -26,7 +26,6 @@ const state = {
   selected: new Set(),   // thread keys
   views: new Map(),      // thread key -> rendered conversation, oldest first
   open: null,            // the view on screen
-  split: store.get("layout") !== "list",
 };
 const key = t => t.account_id + ":" + t.thrid;
 const account = id => state.accounts.find(a => a.id === id);
@@ -242,18 +241,14 @@ function setCursor(i) {
 let showTimer;
 function moveCursor(delta) {
   if (!state.threads.length) return;
-  // The first j in the reading pane opens the row the cursor is already on.
-  const stay = state.split && !state.open && delta > 0;
+  // With nothing open yet, the first j opens the row the cursor is already on.
+  const stay = !state.open && delta > 0;
   setCursor(state.cursor + (stay ? 0 : delta));
   const t = state.threads[state.cursor];
   if (!t) return;
-  if (state.split) {
-    // Holding j should not render every conversation it passes.
-    clearTimeout(showTimer);
-    showTimer = setTimeout(() => show(t), state.views.has(key(t)) ? 0 : 60);
-  } else {
-    ensureView(t);
-  }
+  // Holding j should not render every conversation it passes.
+  clearTimeout(showTimer);
+  showTimer = setTimeout(() => show(t), state.views.has(key(t)) ? 0 : 60);
   // ...and get the one after it ready too.
   const next = state.threads[state.cursor + (delta < 0 ? -1 : 1)];
   if (next) setTimeout(() => ensureView(next), 150);
@@ -340,12 +335,9 @@ function show(t) {
       loadView(v, false).catch(() => {});   // now also ask Gmail whether there is more
     });
   }
-  // Paging past a conversation in the reading pane should not mark it read; resting on it does.
+  // Paging past a conversation should not mark it read; resting on it does.
   clearTimeout(readTimer);
-  if (t.unread) {
-    const mark = () => { if (state.open === v) act("read", [t]); };
-    state.split ? (readTimer = setTimeout(mark, READ_AFTER_MS)) : mark();
-  }
+  if (t.unread) readTimer = setTimeout(() => { if (state.open === v) act("read", [t]); }, READ_AFTER_MS);
 }
 
 function hideView() {
@@ -544,12 +536,11 @@ function act(op, list = targets()) {
   renderList();
 }
 
-/** After archiving or marking unread: in the pane move on to the next conversation,
- *  in the full-width list go back to the list. */
+/** After archiving: move on to the conversation that took its place in the list. */
 function leaveConversation() {
   if (SOLO) return closeWindow();
   const next = state.threads[state.cursor];
-  if (state.split && next) show(next);
+  if (next) show(next);
   else hideView();
   $("#list").focus();
 }
@@ -560,7 +551,6 @@ function markUnread() {
   clearTimeout(readTimer);
   act("unread");
   if (SOLO) closeWindow();
-  else if (!state.split) hideView();
 }
 
 function toggleStar() {
@@ -575,32 +565,14 @@ function toggleStar() {
   updateThreadBar();
 }
 
-function stepThread(delta) {
-  const i = state.threads.findIndex(t => key(t) === state.open?.key);
-  const next = state.threads[(i < 0 ? state.cursor : i) + delta];
-  if (!next) return hideView();
-  setCursor(state.threads.indexOf(next));
-  show(next);
-}
-
 $("#thread-bar").addEventListener("click", e => {
   const a = e.target.dataset?.act;
-  if (a === "back") { hideView(); $("#list").focus(); }
   if (a === "archive") archive();
   if (a === "unread") markUnread();
   if (a === "star") toggleStar();
   if (a === "reply") replyInGmail();
   if (a === "window") openInWindow();
 });
-
-function setLayout(split) {
-  state.split = split;
-  store.set("layout", split ? "split" : "list");
-  document.body.classList.toggle("split", split);
-  $("#layout").textContent = split ? "Full list" : "Reading pane";
-  setCursor(state.cursor);
-}
-$("#layout").onclick = () => setLayout(!state.split);
 
 // ---- keyboard --------------------------------------------------------------
 let gPending = 0;
@@ -622,19 +594,14 @@ function onKey(e) {
     return;
   }
   if (k === "Enter" && e.shiftKey) { openInWindow(); return e.preventDefault(); }
-  // "Inside" a conversation only exists in the full-width layout; in the pane the list stays live.
-  const inside = !!state.open && !state.split;
   if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; setFilter(null); return e.preventDefault(); }
   gPending = 0;
   switch (k) {
-    case "j": inside ? stepThread(1) : moveCursor(1); break;
-    case "k": inside ? stepThread(-1) : moveCursor(-1); break;
-    case "ArrowDown": if (inside) return; moveCursor(1); break;
-    case "ArrowUp": if (inside) return; moveCursor(-1); break;
-    case "o": case "Enter": if (!inside && state.threads[state.cursor]) show(state.threads[state.cursor]); break;
+    case "j": case "ArrowDown": moveCursor(1); break;
+    case "k": case "ArrowUp": moveCursor(-1); break;
+    case "o": case "Enter": if (state.threads[state.cursor]) show(state.threads[state.cursor]); break;
     case "u": case "Escape":
       if (state.selected.size) { state.selected.clear(); renderList(); }
-      else if (inside) { hideView(); $("#list").focus(); }
       break;
     case "n": if (state.open) focusMessage(state.open.focus + 1); break;
     case "p": if (state.open) focusMessage(state.open.focus - 1); break;
@@ -644,7 +611,7 @@ function onKey(e) {
     case "U": markUnread(); break;
     case "x": {
       const t = state.threads[state.cursor];
-      if (inside || !t) break;
+      if (!t) break;
       state.selected.has(key(t)) ? state.selected.delete(key(t)) : state.selected.add(key(t));
       renderList();
       break;
@@ -767,7 +734,6 @@ function listen() {
   if (SOLO) {
     const [account_id, thrid] = SOLO.split(":");
     document.body.classList.add("solo");
-    state.split = false;
     state.accounts = await api("/api/accounts");
     const t = { account_id: +account_id, thrid, subject: "" };
     show(t);
@@ -776,7 +742,6 @@ function listen() {
     listen();
     return;
   }
-  setLayout(state.split);
   await refresh();
   listen();
   api("/api/sync").then(setSync).catch(() => {});

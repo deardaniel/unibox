@@ -95,21 +95,14 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #list { overflow-y: auto; outline: none; flex: 1; min-width: 0; }
 #pane { display: flex; flex-direction: column; min-width: 0; }
 
-/* Full-width list: the pane lies underneath, laid out but unseen, so conversations
-   can be rendered there ahead of time. */
-body:not(.split) #pane { position: absolute; inset: 0; visibility: hidden; background: var(--bg); }
-body:not(.split).reading #pane { visibility: visible; }
-body:not(.split).reading #list { visibility: hidden; }
-/* Reading pane beside the list. */
-body.split #list { flex: none; width: 430px; border-right: 1px solid var(--line); }
-body.split #pane { flex: 1; }
-body.split [data-act="back"] { display: none; }
-body.split:not(.reading) #thread-bar { visibility: hidden; }
+/* The list, with the reading pane beside it. */
+#list { flex: none; width: 430px; border-right: 1px solid var(--line); }
+#pane { flex: 1; }
+body:not(.reading) #thread-bar { visibility: hidden; }
 
 /* A conversation in a window of its own: nothing but the conversation. */
-body.solo #side, body.solo #top, body.solo #list, body.solo [data-act="back"], body.solo [data-act="window"] { display: none; }
+body.solo #side, body.solo #top, body.solo #list, body.solo [data-act="window"] { display: none; }
 body.solo main { margin-left: 0; }
-body.solo #pane { position: static; flex: 1; visibility: visible; }
 body.solo .view h1, body.solo .view .messages { max-width: none; }
 
 /* ---- avatars ---- */
@@ -122,43 +115,33 @@ body.solo .view h1, body.solo .view .messages { max-width: none; }
 .av.big { width: 36px; height: 36px; font-size: 14px; }
 
 /* ---- conversation list ---- */
-.row-t { display: grid; grid-template-columns: 4px 28px 190px 1fr auto 74px; align-items: center; gap: 10px;
-         height: 40px; padding-right: 14px; border-bottom: 1px solid var(--line); cursor: pointer;
-         background: var(--read-bg); }
+/* Each row: avatar, then sender and date on one line, subject and preview beneath. */
+.row-t { position: relative; display: grid; grid-template-columns: 4px 32px 1fr auto; grid-template-rows: auto auto;
+         grid-template-areas: "bar av who date" "bar av text marks"; align-items: center; column-gap: 10px;
+         padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; background: var(--read-bg); }
 .row-t.unread { background: var(--unread-bg); }
 .row-t.unread .who, .row-t.unread .subj { font-weight: 650; }
 .row-t:hover { box-shadow: inset 0 0 0 9999px rgba(127,127,127,.07); }
-.row-t { position: relative; }
+.row-t.open { box-shadow: inset 0 0 0 9999px rgba(127,127,127,.13); }
+.row-t.sel { box-shadow: inset 0 0 0 9999px rgba(91,46,232,.13); }
 /* the cursor marker runs the full height of the row, whatever its padding */
 .row-t.cursor::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--cursor); }
-.row-t.sel { box-shadow: inset 0 0 0 9999px rgba(91,46,232,.13); }
-.row-t .who, .row-t .text, .row-t .subj, .row-t .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-t .bar { grid-area: bar; }
+.row-t .av { grid-area: av; width: 32px; height: 32px; align-self: start; margin-top: 2px; }
+.row-t .who { grid-area: who; }
+.row-t .text { grid-area: text; }
+.row-t .who, .row-t .subj, .row-t .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-t .subj, .row-t .snip { display: block; }
 .row-t .who .c { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
-.row-t .snip { color: var(--muted); font-weight: 400; }
-.row-t .snip:not(:empty)::before { content: " — "; }
-.row-t .marks { color: var(--muted); white-space: nowrap; text-align: right; }
+.row-t .snip { color: var(--muted); font-weight: 400; font-size: 13px; }
+.row-t .marks { grid-area: marks; align-self: start; color: var(--muted); white-space: nowrap; text-align: right; }
 .row-t .marks .star { color: #e2a400; }
 /* The date is smaller than the text beside it. The size goes on an inner span so the cell keeps
    the row's line height and the two share a baseline. */
+.row-t .date { grid-area: date; color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .row-t .date .d { font-size: 12.5px; }
-.row-t .date { color: var(--muted); text-align: right; white-space: nowrap;
-               font-variant-numeric: tabular-nums; }
 .row-t.unread .date { color: var(--ink); font-weight: 600; }
 .empty { color: var(--muted); text-align: center; padding: 70px 20px; }
-
-/* In the split layout each row gets three short lines instead of one long one. */
-body.split .row-t { grid-template-columns: 4px 32px 1fr auto; grid-template-rows: auto auto; column-gap: 10px; row-gap: 0;
-                    grid-template-areas: "bar av who date" "bar av text marks"; height: auto; padding: 8px 12px 8px 0; }
-body.split .row-t .bar { grid-area: bar; }
-body.split .row-t .av { grid-area: av; width: 32px; height: 32px; align-self: start; margin-top: 2px; }
-body.split .row-t .who { grid-area: who; }
-body.split .row-t .date { grid-area: date; }
-body.split .row-t .text { grid-area: text; white-space: normal; }
-body.split .row-t .subj, body.split .row-t .snip { display: block; }
-body.split .row-t .snip::before { content: none; }
-body.split .row-t .snip { font-size: 13px; }
-body.split .row-t .marks { grid-area: marks; align-self: start; }
-body.split .row-t.open { box-shadow: inset 0 0 0 9999px rgba(127,127,127,.13); }
 
 /* ---- conversation view ---- */
 #thread-bar { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex: none; }
