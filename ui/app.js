@@ -999,9 +999,24 @@ function focusMessage(i, scroll = true) {
   const node = nodes[v.focus];
   if (!node) return;
   if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); updateThreadBar(); }
-  // put it at the top of the pane, with the end of the message before it still showing
-  const top = v.focus === 0 ? 0 : node.getBoundingClientRect().top - v.node.getBoundingClientRect().top + v.node.scrollTop - 20;
+  // put it exactly where the first message of a conversation sits: below the room the subject takes
+  const top = node.getBoundingClientRect().top - nodes[0].getBoundingClientRect().top;
+  // A short message at the end leaves too little below it to scroll that far, so room is added
+  // under the conversation: as much as this needs, and never less than the current scroll
+  // position is already using (taking that away would make the pane jump).
+  const box = v.node.querySelector(".messages");
+  const had = +box.dataset.room || 0;
+  const end = box.getBoundingClientRect().bottom - v.node.getBoundingClientRect().top + v.node.scrollTop - had;
+  const room = Math.max(0, Math.ceil(Math.max(top, v.node.scrollTop) + v.node.clientHeight - end));
+  if (room !== had) {
+    box.dataset.room = room;
+    box.style.paddingBottom = room ? `calc(60px + ${room}px)` : "";
+  }
   v.node.scrollTo({ top, behavior: scroll ? "smooth" : "auto" });
+  // a message opened by this step is still growing while the pane glides; land exactly afterwards
+  clearTimeout(focusMessage.settle);
+  const at = v.focus;
+  if (scroll) focusMessage.settle = setTimeout(() => { if (state.open === v && v.focus === at) { focusMessage(at, false); node.classList.toggle("focus", nodes.length > 1); } }, 500);
 }
 
 function updateThreadBar() {
