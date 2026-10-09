@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-build="__BUILD__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -8,33 +8,37 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b2ee8'/%3E%3Cpath d='M14 22h36v22H14z' fill='none' stroke='%23fff' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M14 23l18 13 18-13' fill='none' stroke='%23fff' stroke-width='4' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
+<!-- A thin rail until the pointer (or keyboard focus) is on it. -->
 <aside id="side">
-  <div id="brand">Unibox</div>
+  <div id="brand"><span class="logo">U</span><span class="label">Unibox</span></div>
   <nav id="accounts"></nav>
-  <button id="add" class="quiet">+ Add account</button>
-  <div id="status"></div>
+  <button id="add" class="acct" title="Add a Gmail account"><span class="plus">+</span><span class="label">Add account</span></button>
+  <div id="status" class="label"></div>
 </aside>
 
 <main>
   <header id="top">
     <input id="search" type="search" placeholder="Search the inbox  ( / )" autocomplete="off" spellcheck="false">
+    <button id="layout" title="Switch between the reading pane and a full-width list"></button>
     <button id="sync" title="Check for new mail">Sync</button>
     <button id="help" title="Keyboard shortcuts (?)">?</button>
   </header>
 
-  <section id="list" tabindex="-1"></section>
+  <div id="work">
+    <section id="list" tabindex="-1"></section>
 
-  <section id="thread" hidden>
-    <div id="thread-bar">
-      <button data-act="back" title="Back to inbox (u)">← Inbox</button>
-      <button data-act="archive" title="Archive (e)">Archive</button>
-      <button data-act="unread" title="Mark as unread (Shift+U)">Mark unread</button>
-      <button data-act="star" title="Star (s)">Star</button>
-      <button data-act="reply" title="Open this conversation in Gmail to reply (r)">Reply in Gmail</button>
-    </div>
-    <h1 id="thread-subject"></h1>
-    <div id="messages"></div>
-  </section>
+    <section id="pane">
+      <div id="thread-bar">
+        <button data-act="back" title="Back to inbox (u)">← Inbox</button>
+        <button data-act="archive" title="Archive (e)">Archive</button>
+        <button data-act="unread" title="Mark as unread (Shift+U)">Mark unread</button>
+        <button data-act="star" title="Star (s)">Star</button>
+        <button data-act="reply" title="Open this conversation in Gmail to reply (r)">Reply in Gmail</button>
+      </div>
+      <!-- One .view per conversation; several are kept rendered so opening is instant. -->
+      <div id="views"><div id="pane-empty">Select a conversation to read it here.</div></div>
+    </section>
+  </div>
 </main>
 
 <dialog id="add-dialog">
@@ -55,7 +59,7 @@
 <dialog id="help-dialog">
   <h2>Keyboard shortcuts</h2>
   <table>
-    <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Next / previous conversation</td></tr>
+    <tr><td><kbd>j</kbd> <kbd>k</kbd> or <kbd>↓</kbd> <kbd>↑</kbd></td><td>Next / previous conversation</td></tr>
     <tr><td><kbd>o</kbd> or <kbd>Enter</kbd></td><td>Open conversation</td></tr>
     <tr><td><kbd>u</kbd> or <kbd>Esc</kbd></td><td>Back to the inbox</td></tr>
     <tr><td><kbd>n</kbd> <kbd>p</kbd></td><td>Next / previous message in a conversation</td></tr>

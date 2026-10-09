@@ -6,6 +6,15 @@ const el = (tag, cls, text) => {
   if (text != null) e.textContent = text;
   return e;
 };
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const BUILD = document.documentElement.dataset.build || "0";
+/** How many rendered conversations to keep ready, beyond the one on screen. */
+const KEEP_VIEWS = 10;
+/** In the reading pane a conversation counts as read after it has been up this long. */
+const READ_AFTER_MS = 1500;
 
 const state = {
   accounts: [],
@@ -15,7 +24,9 @@ const state = {
   more: true,
   cursor: 0,
   selected: new Set(),   // thread keys
-  open: null,            // { account_id, thrid, messages, focus }
+  views: new Map(),      // thread key -> rendered conversation, oldest first
+  open: null,            // the view on screen
+  split: store.get("layout") !== "list",
 };
 const key = t => t.account_id + ":" + t.thrid;
 const account = id => state.accounts.find(a => a.id === id);
@@ -51,6 +62,71 @@ function fmtDate(ts, long) {
 }
 const fmtSize = n => n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB";
 
+// ---- sender images -----------------------------------------------------------
+// Gmail's own profile photos are not available over IMAP. For mail from an organisation
+// we show its site icon (looked up by domain); people on webmail get coloured initials.
+const WEBMAIL = new Set(("gmail.com googlemail.com yahoo.com yahoo.co.jp yahoo.co.uk ymail.com outlook.com outlook.jp "
+  + "hotmail.com hotmail.co.jp live.com live.jp msn.com icloud.com me.com mac.com aol.com proton.me protonmail.com "
+  + "docomo.ne.jp ezweb.ne.jp au.com softbank.ne.jp i.softbank.jp nifty.com eircom.net").split(" "));
+const AV_COLORS = ["#5b8def", "#e0723c", "#3fae7a", "#b667d6", "#c9961a", "#d8587e", "#4aa8b8", "#8a7f6a"];
+const icons = new Map(Object.entries(JSON.parse(store.get("icons:" + BUILD) || "{}")));  // domain -> url or ""
+const iconLookups = new Map();
+
+function domainsFor(addr) {
+  const d = (addr.split("@")[1] || "").toLowerCase();
+  if (!d || WEBMAIL.has(d)) return [];
+  const parts = d.split(".");
+  // news.example.com -> example.com; mail.example.co.jp -> example.co.jp
+  const second = parts[parts.length - 2];
+  const keep = parts[parts.length - 1].length === 2 && /^(co|ne|or|ac|go|com|net|org|gr|ed|lg)$/.test(second) ? 3 : 2;
+  const base = parts.slice(-keep).join(".");
+  return base === d ? [d] : [base, d];
+}
+
+function probeIcon(domain) {
+  return new Promise(resolve => {
+    const img = new Image();
+    const url = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+    // A site with no icon comes back as a 16px placeholder globe: not worth showing.
+    img.onload = () => resolve(img.naturalWidth >= 32 ? url : "");
+    img.onerror = () => resolve("");
+    img.src = url;
+  });
+}
+
+function iconFor(addr) {
+  const candidates = domainsFor(addr);
+  if (!candidates.length) return Promise.resolve("");
+  const id = candidates[candidates.length - 1];
+  if (icons.has(id)) return Promise.resolve(icons.get(id));
+  if (!iconLookups.has(id)) {
+    iconLookups.set(id, (async () => {
+      let found = "";
+      for (const d of candidates) if ((found = await probeIcon(d))) break;
+      icons.set(id, found);
+      store.set("icons:" + BUILD, JSON.stringify(Object.fromEntries(icons)));
+      return found;
+    })());
+  }
+  return iconLookups.get(id);
+}
+
+function avatar(name, addr, cls = "") {
+  const label = (name || addr || "?").replace(/^["'\s]+/, "");
+  const node = el("span", "av " + cls, (label[0] || "?").toUpperCase());
+  let h = 0;
+  for (const ch of addr || label) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  node.style.background = AV_COLORS[h % AV_COLORS.length];
+  iconFor(addr || "").then(url => {
+    if (!url) return;
+    const img = el("img");
+    img.alt = "";
+    img.src = url;
+    node.prepend(img);
+  });
+  return node;
+}
+
 // ---- sidebar ---------------------------------------------------------------
 function renderAccounts() {
   const nav = $("#accounts");
@@ -59,15 +135,15 @@ function renderAccounts() {
     const b = el("button", "acct" + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : ""));
     const dot = el("span", "dot");
     dot.style.background = color;
-    b.append(dot, el("span", "name", name), el("span", "n", unread || ""));
+    b.append(dot, el("span", "n", unread || ""), el("span", "name", name));
+    b.title = acct ? (acct.last_error ? `${acct.email}: sync problem: ${acct.last_error}` : acct.email) : "All inboxes";
     if (acct) {
-      b.title = acct.last_error ? "Sync problem: " + acct.last_error : acct.email;
       const rm = el("span", "rm", "×");
       rm.title = "Remove this account from Unibox";
       rm.onclick = e => { e.stopPropagation(); removeAccount(acct); };
       b.append(rm);
     }
-    b.onclick = () => setFilter(id);
+    b.onclick = () => { setFilter(id); b.blur(); };
     nav.append(b);
   };
   item(null, "All inboxes", "var(--muted)", state.accounts.reduce((n, a) => n + a.unread, 0));
@@ -83,6 +159,7 @@ async function removeAccount(a) {
   if (!confirm(`Remove ${a.email} from Unibox?\n\nThis deletes the copy of its mail on this PC and the saved app password. Nothing changes in Gmail.`)) return;
   await api("/api/accounts/" + a.id, { method: "DELETE" });
   if (state.filter === a.id) state.filter = null;
+  hideView();
   refresh();
 }
 
@@ -90,9 +167,10 @@ function setFilter(id) {
   state.filter = id;
   state.cursor = 0;
   state.selected.clear();
-  showList();
+  hideView();
   loadThreads(true);
   renderAccounts();
+  $("#list").focus();
 }
 
 // ---- conversation list -------------------------------------------------------
@@ -106,6 +184,7 @@ async function loadThreads(reset) {
   renderList();
 }
 
+let hoverTimer;
 function renderList() {
   const list = $("#list");
   const top = list.scrollTop;
@@ -120,32 +199,56 @@ function renderList() {
   }
   state.threads.forEach((t, i) => {
     const row = el("div", "row-t" + (t.unread ? " unread" : "") + (i === state.cursor ? " cursor" : "")
-      + (state.selected.has(key(t)) ? " sel" : ""));
-    const dot = el("span", "dot");
+      + (state.selected.has(key(t)) ? " sel" : "") + (state.open?.key === key(t) ? " open" : ""));
+    const av = avatar(t.from_name, t.from_addr);
+    const dot = el("span", "who-dot");
     dot.style.background = account(t.account_id)?.color || "gray";
-    dot.title = account(t.account_id)?.email || "";
+    av.append(dot);
+    av.title = account(t.account_id)?.email || "";
     const who = el("span", "who", t.senders || "(unknown)");
     if (t.count > 1) who.append(el("span", "c", t.count));
     const text = el("span", "text");
-    text.append(el("span", "subj", t.subject), el("span", "snip", t.snippet ? " — " + t.snippet : ""));
+    text.append(el("span", "subj", t.subject), el("span", "snip", t.snippet));
     const marks = el("span", "marks");
     if (t.has_attach) marks.append("📎");
     if (t.starred) marks.append(el("span", "star", "★"));
-    row.append(el("span", "bar"), dot, who, text, marks, el("span", "date", fmtDate(t.date)));
-    row.onclick = () => { state.cursor = i; openThread(t); };
+    row.append(el("span", "bar"), av, who, text, marks, el("span", "date", fmtDate(t.date)));
+    row.onclick = () => { setCursor(i); show(t); };
+    // Start rendering as soon as the pointer rests on a row, so a click opens it instantly.
+    row.onmouseenter = () => { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => ensureView(t), 70); };
+    row.onmouseleave = () => clearTimeout(hoverTimer);
     list.append(row);
   });
   list.scrollTop = top;
 }
 
-function moveCursor(delta) {
+function setCursor(i) {
   const n = state.threads.length;
-  if (!n) return;
-  state.cursor = Math.max(0, Math.min(n - 1, state.cursor + delta));
+  state.cursor = Math.max(0, Math.min(n - 1, i));
   const rows = $("#list").children;
-  for (let i = 0; i < rows.length; i++) rows[i].classList.toggle("cursor", i === state.cursor);
+  for (let r = 0; r < rows.length; r++) rows[r].classList.toggle("cursor", r === state.cursor);
   rows[state.cursor]?.scrollIntoView({ block: "nearest" });
   if (state.more && state.cursor > n - 15) loadThreads(false);
+}
+
+let showTimer;
+function moveCursor(delta) {
+  if (!state.threads.length) return;
+  // The first j in the reading pane opens the row the cursor is already on.
+  const stay = state.split && !state.open && delta > 0;
+  setCursor(state.cursor + (stay ? 0 : delta));
+  const t = state.threads[state.cursor];
+  if (!t) return;
+  if (state.split) {
+    // Holding j should not render every conversation it passes.
+    clearTimeout(showTimer);
+    showTimer = setTimeout(() => show(t), state.views.has(key(t)) ? 0 : 60);
+  } else {
+    ensureView(t);
+  }
+  // ...and get the one after it ready too.
+  const next = state.threads[state.cursor + (delta < 0 ? -1 : 1)];
+  if (next) setTimeout(() => ensureView(next), 150);
 }
 
 $("#list").addEventListener("scroll", e => {
@@ -156,96 +259,104 @@ $("#list").addEventListener("scroll", e => {
   }
 });
 
-// ---- actions ---------------------------------------------------------------
-// Which conversations an action applies to: the open one, else the selection, else the cursor row.
-function targets() {
-  if (state.open) return [state.open];
-  if (state.selected.size) return state.threads.filter(t => state.selected.has(key(t)));
-  const t = state.threads[state.cursor];
-  return t ? [t] : [];
-}
-
-async function act(op, list = targets()) {
-  if (!list.length) return;
-  // Reflect it immediately; the server confirms (or the next sync corrects) afterwards.
-  for (const t of list) {
-    const row = state.threads.find(x => key(x) === key(t));
-    if (op === "archive") state.threads = state.threads.filter(x => key(x) !== key(t));
-    else if (row) {
-      if (op === "read") row.unread = 0;
-      if (op === "unread") row.unread = 1;
-      if (op === "star") row.starred = true;
-      if (op === "unstar") row.starred = false;
-    }
+// ---- rendered conversations ----------------------------------------------------
+// A view is a conversation laid out in the pane, with its message frames loaded. Views are
+// made ahead of time (hover, cursor) and kept for a while, so showing one is just a class change.
+function ensureView(t) {
+  const k = key(t);
+  let v = state.views.get(k);
+  if (v) {
+    state.views.delete(k);       // move to the fresh end
+    state.views.set(k, v);
+    return v;
   }
-  state.selected.clear();
-  renderList();
-  for (const t of list) {
-    api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } })
-      .catch(e => toast("Gmail didn't accept that: " + e.message));
+  v = { key: k, account_id: t.account_id, thrid: t.thrid, messages: [], focus: 0, node: el("div", "view") };
+  v.node.append(el("h1", "", t.subject), el("div", "messages"));
+  $("#views").append(v.node);
+  state.views.set(k, v);
+  for (const old of state.views.values()) {
+    if (state.views.size <= KEEP_VIEWS + 1) break;
+    if (old !== state.open && old !== v) dropView(old);
   }
+  v.ready = loadView(v, true).catch(() => {});
+  return v;
 }
 
-function toggleStar() {
-  const list = targets();
-  if (!list.length) return;
-  const on = state.open ? state.open.messages.some(m => m.starred)
-    : list.every(t => state.threads.find(x => key(x) === key(t))?.starred);
-  if (state.open) state.open.messages.forEach((m, i, all) => (m.starred = !on && i === all.length - 1));
-  act(on ? "unstar" : "star", list);
-  if (state.open) updateThreadBar();
+function dropView(v) {
+  v.node.remove();
+  state.views.delete(v.key);
+  if (state.open === v) hideView();
 }
 
-// ---- conversation view -------------------------------------------------------
-function showList() {
-  state.open = null;
-  $("#thread").hidden = true;
-  $("#list").hidden = false;
-  $("#messages").textContent = "";
-}
-
-async function openThread(t) {
-  state.open = { account_id: t.account_id, thrid: t.thrid, messages: [], focus: 0 };
-  $("#list").hidden = true;
-  $("#thread").hidden = false;
-  $("#thread").scrollTop = 0;
-  $("#thread-subject").textContent = t.subject;
-  $("#messages").textContent = "";
-  await loadThread(true);
-  if (t.unread) act("read", [t]);
-}
-
-async function loadThread(first) {
-  const o = state.open;
-  if (!o) return;
-  const data = await api(`/api/thread/${o.account_id}/${o.thrid}`);
-  if (state.open !== o) return;
-  const before = new Map(o.messages.map(m => [m.id, m]));
-  o.messages = data.messages;
-  if (first) o.focus = Math.max(0, o.messages.findIndex(m => !m.seen));
-  const box = $("#messages");
+/** Read the conversation and bring the view's messages up to date. `peek` answers from the
+ *  local cache only; without it the app also re-checks Gmail for messages it has not seen. */
+async function loadView(v, peek) {
+  const data = await api(`/api/thread/${v.account_id}/${v.thrid}${peek ? "?peek=true" : ""}`);
+  if (state.views.get(v.key) !== v) return;
+  const first = !v.messages.length;
+  const before = new Map(v.messages.map(m => [m.id, m]));
+  v.messages = data.messages;
+  if (first) v.focus = Math.max(0, v.messages.findIndex(m => !m.seen));
+  const box = v.node.querySelector(".messages");
   // Keep frames that are already showing; only add or fill in what changed.
-  o.messages.forEach((m, i) => {
+  v.messages.forEach((m, i) => {
     const old = before.get(m.id);
     const node = box.querySelector(`[data-id="${m.id}"]`);
     if (node && old && old.has_body === m.has_body && old.attachments.length === m.attachments.length) return;
-    const open = node ? !node.classList.contains("closed") : (!m.seen || i === o.messages.length - 1);
-    const fresh = renderMessage(m, open);
+    const open = node ? !node.classList.contains("closed") : (!m.seen || i === v.messages.length - 1);
+    const fresh = renderMessage(v, m, open);
     if (node) node.replaceWith(fresh);
     else box.insertBefore(fresh, box.children[i] || null);
   });
-  if (o.messages[0]) $("#thread-subject").textContent = o.messages[0].subject;
-  updateThreadBar();
-  if (first) focusMessage(o.focus, false);
+  if (v.messages[0]) v.node.querySelector("h1").textContent = v.messages[0].subject.replace(/^(re|fwd?):\s*/i, "") || v.messages[0].subject;
+  if (state.open === v) updateThreadBar();
 }
 
-function renderMessage(m, open) {
+let readTimer;
+function show(t) {
+  clearTimeout(showTimer);
+  const v = ensureView(t);
+  if (state.open !== v) {
+    state.open?.node.classList.remove("on");
+    v.node.classList.add("on");
+    state.open = v;
+    document.body.classList.add("reading");
+    updateThreadBar();
+    markOpenRow();
+    v.ready.then(() => {
+      if (state.open !== v) return;
+      focusMessage(v.focus, false);
+      loadView(v, false).catch(() => {});   // now also ask Gmail whether there is more
+    });
+  }
+  // Paging past a conversation in the reading pane should not mark it read; resting on it does.
+  clearTimeout(readTimer);
+  if (t.unread) {
+    const mark = () => { if (state.open === v) act("read", [t]); };
+    state.split ? (readTimer = setTimeout(mark, READ_AFTER_MS)) : mark();
+  }
+}
+
+function hideView() {
+  clearTimeout(readTimer);
+  state.open?.node.classList.remove("on");
+  state.open = null;
+  document.body.classList.remove("reading");
+  markOpenRow();
+}
+
+function markOpenRow() {
+  const rows = $("#list").children;
+  state.threads.forEach((t, i) => rows[i]?.classList.toggle("open", state.open?.key === key(t)));
+}
+
+function renderMessage(v, m, open) {
   const node = el("article", "msg" + (open ? "" : " closed"));
   node.dataset.id = m.id;
   const head = el("header");
   const from = el("span", "from", m.from_name || m.from_addr || "(unknown)");
   if (m.from_name) from.append(el("span", "addr", "  " + m.from_addr));
-  head.append(from, el("span", "meta", m.snippet), el("span", "when", fmtDate(m.date, true)));
+  head.append(avatar(m.from_name, m.from_addr, "big"), from, el("span", "meta", m.snippet), el("span", "when", fmtDate(m.date, true)));
   head.onclick = () => { node.classList.toggle("closed"); if (!node.classList.contains("closed")) fill(node, m); };
   node.append(head, el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", ")), el("div", "content"));
   if (open) fill(node, m);
@@ -276,7 +387,7 @@ function fill(node, m) {
     // Keyboard shortcuts keep working after clicking inside a message.
     doc.addEventListener("keydown", e => onKey(e));
   });
-  f.src = `/api/message/${m.id}/html`;
+  f.src = `/api/message/${m.id}/html?v=${BUILD}`;
   content.append(f);
   if (m.attachments.length) {
     const files = el("div", "files");
@@ -297,15 +408,16 @@ dark.addEventListener("change", () => {
 });
 
 function focusMessage(i, scroll = true) {
-  const o = state.open;
-  if (!o || !o.messages.length) return;
-  o.focus = Math.max(0, Math.min(o.messages.length - 1, i));
-  const nodes = $("#messages").children;
-  for (let n = 0; n < nodes.length; n++) nodes[n].classList.toggle("focus", n === o.focus && nodes.length > 1);
-  const node = nodes[o.focus];
+  const v = state.open;
+  if (!v || !v.messages.length) return;
+  v.focus = Math.max(0, Math.min(v.messages.length - 1, i));
+  const nodes = v.node.querySelector(".messages").children;
+  for (let n = 0; n < nodes.length; n++) nodes[n].classList.toggle("focus", n === v.focus && nodes.length > 1);
+  const node = nodes[v.focus];
   if (!node) return;
-  if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, o.messages[o.focus]); }
-  if (scroll || o.focus > 0) node.scrollIntoView({ block: "start", behavior: scroll ? "smooth" : "auto" });
+  if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); }
+  if (v.focus === 0) { if (scroll) v.node.scrollTo({ top: 0, behavior: "smooth" }); }
+  else node.scrollIntoView({ block: "start", behavior: scroll ? "smooth" : "auto" });
 }
 
 function updateThreadBar() {
@@ -320,26 +432,92 @@ function replyInGmail() {
   openExternal(`https://mail.google.com/mail/?authuser=${encodeURIComponent(a.email)}#all/${BigInt(o.thrid).toString(16)}`);
 }
 
-// After archiving or leaving a conversation, land back in the list.
-function closeThread() { showList(); renderList(); $("#list").focus(); }
+// ---- actions ---------------------------------------------------------------
+// Which conversations an action applies to: the selection, else the open one, else the cursor row.
+function targets() {
+  if (state.selected.size) return state.threads.filter(t => state.selected.has(key(t)));
+  if (state.open) return [state.open];
+  const t = state.threads[state.cursor];
+  return t ? [t] : [];
+}
+
+function act(op, list = targets()) {
+  if (!list.length) return;
+  // Reflect it immediately; the server confirms (or the next sync corrects) afterwards.
+  for (const t of list) {
+    const k = key(t);
+    const row = state.threads.find(x => key(x) === k);
+    if (op === "archive") {
+      state.threads = state.threads.filter(x => key(x) !== k);
+      const v = state.views.get(k);
+      if (v) dropView(v);
+    } else if (row) {
+      if (op === "read") row.unread = 0;
+      if (op === "unread") row.unread = 1;
+      if (op === "star") row.starred = true;
+      if (op === "unstar") row.starred = false;
+    }
+    api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } })
+      .catch(e => toast("Gmail didn't accept that: " + e.message));
+  }
+  state.selected.clear();
+  renderList();
+}
+
+/** After archiving or marking unread: in the pane move on to the next conversation,
+ *  in the full-width list go back to the list. */
+function leaveConversation() {
+  const next = state.threads[state.cursor];
+  if (state.split && next) show(next);
+  else hideView();
+  $("#list").focus();
+}
+
+function archive() { act("archive"); leaveConversation(); }
+
+function markUnread() {
+  clearTimeout(readTimer);
+  act("unread");
+  if (!state.split) hideView();
+}
+
+function toggleStar() {
+  const list = targets();
+  if (!list.length) return;
+  const on = list.every(t => state.threads.find(x => key(x) === key(t))?.starred);
+  for (const t of list) {
+    const v = state.views.get(key(t));
+    v?.messages.forEach((m, i, all) => (m.starred = !on && i === all.length - 1));
+  }
+  act(on ? "unstar" : "star", list);
+  updateThreadBar();
+}
 
 function stepThread(delta) {
-  const o = state.open;
-  const i = state.threads.findIndex(t => key(t) === key(o));
+  const i = state.threads.findIndex(t => key(t) === state.open?.key);
   const next = state.threads[(i < 0 ? state.cursor : i) + delta];
-  if (!next) return closeThread();
-  state.cursor = state.threads.indexOf(next);
-  openThread(next);
+  if (!next) return hideView();
+  setCursor(state.threads.indexOf(next));
+  show(next);
 }
 
 $("#thread-bar").addEventListener("click", e => {
   const a = e.target.dataset?.act;
-  if (a === "back") closeThread();
-  if (a === "archive") { act("archive"); closeThread(); }
-  if (a === "unread") { act("unread"); closeThread(); }
+  if (a === "back") { hideView(); $("#list").focus(); }
+  if (a === "archive") archive();
+  if (a === "unread") markUnread();
   if (a === "star") toggleStar();
   if (a === "reply") replyInGmail();
 });
+
+function setLayout(split) {
+  state.split = split;
+  store.set("layout", split ? "split" : "list");
+  document.body.classList.toggle("split", split);
+  $("#layout").textContent = split ? "Full list" : "Reading pane";
+  setCursor(state.cursor);
+}
+$("#layout").onclick = () => setLayout(!state.split);
 
 // ---- keyboard --------------------------------------------------------------
 let gPending = 0;
@@ -352,26 +530,29 @@ function onKey(e) {
     return;
   }
   const k = e.key;
-  const inThread = !!state.open;
-  const handled = () => { e.preventDefault(); };
-  if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; setFilter(null); return handled(); }
+  // "Inside" a conversation only exists in the full-width layout; in the pane the list stays live.
+  const inside = !!state.open && !state.split;
+  if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; setFilter(null); return e.preventDefault(); }
   gPending = 0;
   switch (k) {
-    case "j": inThread ? stepThread(1) : moveCursor(1); break;
-    case "k": inThread ? stepThread(-1) : moveCursor(-1); break;
-    case "ArrowDown": if (inThread) return; moveCursor(1); break;
-    case "ArrowUp": if (inThread) return; moveCursor(-1); break;
-    case "o": case "Enter": if (!inThread && state.threads[state.cursor]) openThread(state.threads[state.cursor]); break;
-    case "u": case "Escape": if (inThread) closeThread(); else if (state.selected.size) { state.selected.clear(); renderList(); } break;
-    case "n": if (inThread) focusMessage(state.open.focus + 1); break;
-    case "p": if (inThread) focusMessage(state.open.focus - 1); break;
-    case "e": act("archive"); if (inThread) closeThread(); break;
+    case "j": inside ? stepThread(1) : moveCursor(1); break;
+    case "k": inside ? stepThread(-1) : moveCursor(-1); break;
+    case "ArrowDown": if (inside) return; moveCursor(1); break;
+    case "ArrowUp": if (inside) return; moveCursor(-1); break;
+    case "o": case "Enter": if (!inside && state.threads[state.cursor]) show(state.threads[state.cursor]); break;
+    case "u": case "Escape":
+      if (state.selected.size) { state.selected.clear(); renderList(); }
+      else if (inside) { hideView(); $("#list").focus(); }
+      break;
+    case "n": if (state.open) focusMessage(state.open.focus + 1); break;
+    case "p": if (state.open) focusMessage(state.open.focus - 1); break;
+    case "e": archive(); break;
     case "s": toggleStar(); break;
     case "I": act("read"); break;
-    case "U": act("unread"); if (inThread) closeThread(); break;
+    case "U": markUnread(); break;
     case "x": {
       const t = state.threads[state.cursor];
-      if (inThread || !t) break;
+      if (inside || !t) break;
       state.selected.has(key(t)) ? state.selected.delete(key(t)) : state.selected.add(key(t));
       renderList();
       break;
@@ -388,21 +569,21 @@ function onKey(e) {
       }
       return;
   }
-  handled();
+  e.preventDefault();
 }
 document.addEventListener("keydown", onKey);
 
 let searchTimer;
 $("#search").addEventListener("input", e => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { state.q = e.target.value.trim(); state.cursor = 0; showList(); loadThreads(true); }, 200);
+  searchTimer = setTimeout(() => { state.q = e.target.value.trim(); state.cursor = 0; hideView(); loadThreads(true); }, 200);
 });
 $("#search").addEventListener("keydown", e => { if (e.key === "Enter") { e.target.blur(); $("#list").focus(); } });
 
 // ---- toolbar and dialogs -------------------------------------------------------
 $("#sync").onclick = () => { api("/api/sync", { method: "POST" }); $("#status").textContent = "Syncing…"; };
 $("#help").onclick = () => $("#help-dialog").showModal();
-$("#add").onclick = () => { $("#add-error").textContent = ""; $("#add-dialog").showModal(); };
+$("#add").onclick = () => { $("#add").blur(); $("#add-error").textContent = ""; $("#add-dialog").showModal(); };
 $("#add-cancel").onclick = () => $("#add-dialog").close();
 document.addEventListener("click", e => {
   const a = e.target.closest?.("a[data-external]");
@@ -444,12 +625,17 @@ async function refresh() {
     page = await api("/api/threads?" + p);
     rows = rows.concat(page);
   } while (page.length === 60 && rows.length < want);
-  const at = state.threads[state.cursor] && key(state.threads[state.cursor]);
+  const at = state.open?.key || (state.threads[state.cursor] && key(state.threads[state.cursor]));
   state.threads = rows;
   state.more = page.length === 60;
   const again = rows.findIndex(t => key(t) === at);
   if (again >= 0) state.cursor = again;
-  if (!state.open) renderList();
+  renderList();
+  // A rendered conversation that has gained messages (or bodies) since is brought up to date.
+  for (const v of state.views.values()) {
+    const row = rows.find(t => key(t) === v.key);
+    if ((row && row.count !== v.messages.length) || v.messages.some(m => !m.has_body)) loadView(v, true).catch(() => {});
+  }
 }
 
 let refreshTimer;
@@ -460,15 +646,19 @@ function listen() {
   es.onmessage = e => {
     const ev = JSON.parse(e.data);
     if (ev.kind === "error") return toast(ev.detail);
-    if (ev.kind === "thread") { if (state.open?.thrid === ev.detail) loadThread(false); return; }
+    if (ev.kind === "thread") {
+      for (const v of state.views.values()) if (v.thrid === ev.detail) loadView(v, true).catch(() => {});
+    }
     refreshSoon();
-    if (state.open && state.open.messages.some(m => !m.has_body)) loadThread(false);
   };
 }
 
 (async () => {
+  setLayout(state.split);
   await refresh();
   listen();
   $("#list").focus();
   if (!state.accounts.length) $("#add-dialog").showModal();
+  // Have the top of the inbox rendered before it is asked for.
+  state.threads.slice(0, 2).forEach(t => ensureView(t));
 })();
