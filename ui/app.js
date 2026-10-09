@@ -29,6 +29,7 @@ const state = {
   collection: null,      // { title }: the list is showing a set the assistant picked
   unreadOnly: false,     // list only conversations with something unread
   kept: new Set(),       // thread keys opened while unreadOnly is on; they stay listed once read
+  peopleOnly: false,     // leave out conversations that only systems sent (newsletters, receipts, notices)
 };
 const key = t => t.account_id + ":" + t.thrid;
 
@@ -262,18 +263,26 @@ function listParams(offset) {
   const p = new URLSearchParams({ q: state.q, offset });
   if (state.filter != null) p.set("account", state.filter);
   if (state.unreadOnly) { p.set("unread", true); p.set("keep", [...state.kept].join(",")); }
+  if (state.peopleOnly) p.set("people", true);
   return p;
 }
 
-/** Show only conversations with something unread. Ones opened while it is on stay listed. */
-function setUnreadOnly(on) {
+/** The list's two narrowing buttons: only unread (conversations opened while it is on stay
+ *  listed), and only mail that people wrote. */
+const LIST_FILTERS = { unreadOnly: "#unread-only", peopleOnly: "#people-only" };
+function showListFilters() {
+  for (const [name, button] of Object.entries(LIST_FILTERS)) {
+    $(button).classList.toggle("on", state[name]);
+    $(button).setAttribute("aria-pressed", state[name]);
+  }
+}
+function setListFilter(name, on) {
   leaveCollection();
-  state.unreadOnly = on;
+  state[name] = on;
   state.kept = new Set();
   state.cursor = 0;
   state.selected.clear();
-  $("#unread-only").classList.toggle("on", on);
-  $("#unread-only").setAttribute("aria-pressed", on);
+  showListFilters();
   hideView();
   loadThreads(true);
 }
@@ -311,7 +320,8 @@ function renderList() {
   if (!state.threads.length) {
     list.append(el("div", "empty",
       !state.accounts.length ? "Add a Gmail account to get started."
-        : state.unreadOnly ? (state.q ? "Nothing unread matches that search." : "Nothing unread.")
+        : state.unreadOnly ? (state.q ? "Nothing unread matches that search." : state.peopleOnly ? "Nothing unread from people." : "Nothing unread.")
+        : state.peopleOnly ? (state.q ? "Nothing from people matches that search." : "Nothing from people in the inbox.")
         : state.q ? "Nothing in the inbox matches that search."
         : state.accounts.some(a => !a.last_sync) ? "Fetching your inbox…" : "Inbox zero."));
     return;
@@ -483,7 +493,8 @@ function renderMessage(v, m, open) {
   if (m.from_name) name.append(el("span", "addr", "  " + m.from_addr));
   from.append(name);
   // Gmail's verdict on whether the sender is who the From line says.
-  const tr = m.trust && m.trust.level !== "none" ? m.trust : null;
+  const group = m.facts?.group, shown = senderTrust(m);
+  const tr = shown && shown.level !== "none" ? shown : null;
   if (tr) {
     const badge = el("button", "trust " + tr.level);
     badge.append(icon(tr.level));
@@ -501,7 +512,12 @@ function renderMessage(v, m, open) {
   top.append(from, el("span", "when", fmtDate(m.date, true)), more);
   const who = el("div", "who");
   const to = el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", "));
-  if (m.trust?.reply_to) to.append(el("span", "replies" + (tr?.level === "verified" ? "" : " warn"), " · replies go to " + m.trust.reply_to));
+  if (group) to.append(el("span", "via", " · via the group " + (group.address || "it was sent to")));
+  // (a group that rewrites the sender points replies back at the person, which is as it should be)
+  if (m.trust?.reply_to && m.trust.reply_to !== group?.sender_addr)
+    to.append(el("span", "replies" + (tr?.level === "verified" ? "" : " warn"), " · replies go to " + m.trust.reply_to));
+  const un = unsubscribeButton(m);
+  if (un) to.append(" · ", un);
   who.append(top, to, el("div", "meta", m.snippet));
   head.append(avatar(m.from_name, m.from_addr, "big"), who);
   head.onclick = () => { node.classList.toggle("closed"); if (!node.classList.contains("closed")) fill(node, m); };
@@ -509,7 +525,7 @@ function renderMessage(v, m, open) {
   // Say it in words when something is wrong; a small icon is too easy to miss.
   const problems = [];
   if (tr?.level === "failed") problems.push(tr.summary);
-  if (m.trust?.name_address) problems.push(`The sender's name shows ${m.trust.name_address}, but this was sent from ${m.from_addr}.`);
+  if (m.trust?.name_address && !group?.rewritten) problems.push(`The sender's name shows ${m.trust.name_address}, but this was sent from ${m.from_addr}.`);
   if (problems.length) node.append(el("div", "caution", problems.join(" ")));
   node.append(el("div", "content"));
   if (open) fill(node, m);
@@ -532,6 +548,16 @@ async function messageMenu(anchor, node, m) {
   item("html", "Formatted", !!parts);
   item("text", "Plain text", !!parts?.text);
   item("source", "Original message", !!parts);
+  if (m.has_body && current === "html" && node.dataset.pictures !== "1" && !m.pictures) {
+    const b = el("button", "sep", "Show pictures");
+    b.onclick = () => { menu.remove(); showPictures(node, m); };
+    menu.append(b);
+  }
+  if (m.pictures) {
+    const b = el("button", "sep", "Stop showing this sender's pictures");
+    b.onclick = () => { menu.remove(); alwaysPictures(m, false); };
+    menu.append(b);
+  }
   if (m.trust) {
     const b = el("button", "sep", "Sender details…");
     b.onclick = () => { menu.remove(); senderDetails(m); };
@@ -545,9 +571,170 @@ async function messageMenu(anchor, node, m) {
   addEventListener("pointerdown", close, true);
 }
 
+/** Whose verdict the badge shows. A Google Group that puts its own name in the From line is
+ *  what Gmail checked; what matters is the check the group made on the person who wrote. */
+const senderTrust = m => (m.facts?.group?.rewritten ? m.facts.group.trust : m.trust);
+
+/** A way off a mailing list, when the sender offers one and is who it says it is. */
+function unsubscribeButton(m) {
+  const u = m.facts?.unsubscribe;
+  if (!u || m.facts.group || m.trust?.level === "failed") return null;
+  const b = el("button", "unsub", m.unsubscribed ? "Unsubscribed" : "Unsubscribe");
+  const who = m.from_name || m.from_addr;
+  b.disabled = !!m.unsubscribed;
+  b.title = m.unsubscribed ? "You asked this sender to stop."
+    : u.one_click ? `Tell ${who} to stop sending these. Nothing opens; the request goes straight to the sender.`
+    : u.url ? "Open this sender's unsubscribe page in your browser."
+    : "Open a ready-made unsubscribe email in Gmail, for you to send.";
+  b.onclick = async e => {
+    e.stopPropagation();
+    if (u.one_click) {
+      b.disabled = true;
+      b.textContent = "Unsubscribing…";
+      try {
+        await api(`/api/message/${m.id}/unsubscribe`, { method: "POST" });
+        for (const v of state.views.values()) for (const x of v.messages) if (x.from_addr === m.from_addr) x.unsubscribed = true;
+        b.textContent = "Unsubscribed";
+        b.title = "You asked this sender to stop.";
+        toast(`Unsubscribed from ${who}.`);
+      } catch (err) {
+        b.disabled = false;
+        b.textContent = "Unsubscribe";
+        toast("Couldn't unsubscribe: " + err.message);
+      }
+    } else if (u.url) {
+      openExternal(u.url);
+      toast("Opened the sender's unsubscribe page in your browser.");
+    } else {
+      // an address to write to: hand Gmail a filled-in message from the right account
+      const mail = new URL(u.mailto), a = account(state.open?.account_id);
+      const p = new URLSearchParams({ view: "cm", fs: 1, to: decodeURIComponent(mail.pathname),
+        su: mail.searchParams.get("subject") || "unsubscribe", body: mail.searchParams.get("body") || "unsubscribe" });
+      if (a) p.set("authuser", a.email);
+      openExternal("https://mail.google.com/mail/?" + p);
+      toast("Opened an unsubscribe email in Gmail. Send it to leave the list.");
+    }
+  };
+  return b;
+}
+
+// ---- pictures ------------------------------------------------------------------
+// Fetching a picture from the sender's server tells them the message was opened, and when and
+// roughly where. So nothing is fetched until asked: once for a message, or always for a sender.
+function showPictures(node, m) {
+  node.dataset.pictures = "1";
+  node.querySelector(".content").textContent = "";
+  fill(node, m);
+}
+function alwaysPictures(m, allow) {
+  api("/api/pictures", { body: { sender: m.from_addr, allow } }).catch(e => toast(e.message));
+  for (const v of state.views.values()) {
+    v.messages.forEach((x, i) => {
+      if (x.from_addr !== m.from_addr) return;
+      x.pictures = allow;
+      const node = v.node.querySelector(`.msg[data-id="${x.id}"]`);
+      if (!node) return;
+      delete node.dataset.pictures;
+      node.querySelector(".content").textContent = "";
+      if (!node.classList.contains("closed")) fill(node, x);
+    });
+  }
+  toast(allow ? `Pictures from ${m.from_addr} will always be shown.` : `Pictures from ${m.from_addr} are hidden again.`);
+}
+
+// ---- events and bookings ---------------------------------------------------------
+/** The moment an invitation's time means. Its time zone is by name, which the browser knows. */
+function eventMoment(w) {
+  const p = w.value.match(/^(\d{4})(\d\d)(\d\d)(?:T(\d\d)(\d\d))?/);
+  if (!p) return null;
+  const [y, mo, d, h, mi] = [+p[1], p[2] - 1, +p[3], +(p[4] || 0), +(p[5] || 0)];
+  if (w.all_day || !w.tz) return new Date(y, mo, d, h, mi);
+  const wall = Date.UTC(y, mo, d, h, mi);
+  if (w.tz === "UTC") return new Date(wall);
+  try {
+    const f = new Intl.DateTimeFormat("en-US", { timeZone: w.tz, hourCycle: "h23", year: "numeric", month: "numeric",
+      day: "numeric", hour: "numeric", minute: "numeric" });
+    const there = t => { const q = Object.fromEntries(f.formatToParts(new Date(t)).map(x => [x.type, +x.value])); return Date.UTC(q.year, q.month - 1, q.day, q.hour, q.minute); };
+    let t = wall - (there(wall) - wall);
+    t = wall - (there(t) - t);      // once more, in case that crossed a clock change
+    return new Date(t);
+  } catch { return new Date(y, mo, d, h, mi); }   // a zone name the browser doesn't know: read it as local
+}
+
+function eventWhen(e) {
+  const start = eventMoment(e.start);
+  if (!start) return "";
+  let end = e.end && eventMoment(e.end);
+  const day = { weekday: "short", month: "short", day: "numeric", year: "numeric" }, time = { hour: "numeric", minute: "2-digit" };
+  if (e.start.all_day) {
+    if (end) end = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1);   // the end day is not included
+    const a = start.toLocaleDateString([], day);
+    return end && end > start ? `${a} – ${end.toLocaleDateString([], day)}` : `${a}, all day`;
+  }
+  const a = `${start.toLocaleDateString([], day)}, ${start.toLocaleTimeString([], time)}`;
+  if (!end || end <= start) return a;
+  return start.toDateString() === end.toDateString() ? `${a} – ${end.toLocaleTimeString([], time)}`
+    : `${a} – ${end.toLocaleDateString([], day)}, ${end.toLocaleTimeString([], time)}`;
+}
+
+function cardRows(card, rows) {
+  const table = el("table");
+  for (const [k, v] of rows) {
+    if (!v) continue;
+    const r = el("tr");
+    r.append(el("td", "", k), el("td", "", v));
+    table.append(r);
+  }
+  card.append(table);
+}
+
+function eventCard(e) {
+  const card = el("div", "card event" + (e.method === "cancel" ? " cancelled" : ""));
+  card.append(el("div", "kind", { request: "Invitation", cancel: "Cancelled", reply: "Reply to an invitation" }[e.method] || "Event"),
+    el("div", "title", e.summary || "(no title)"));
+  const name = p => p.name || p.email;
+  const mark = { accepted: " ✓", declined: " ✗", tentative: " ?" };
+  const going = e.attendees.slice(0, 8).map(p => name(p) + (mark[p.status] || "")).join(", ")
+    + (e.attendees.length > 8 ? `, and ${e.attendees.length - 8} more` : "");
+  const zone = e.start.tz && e.start.tz !== "UTC" && !e.start.all_day ? ` (your time; set in ${e.start.tz})` : "";
+  cardRows(card, [["When", eventWhen(e) + (e.recurs ? ", repeating" : "") + zone], ["Where", e.location],
+    ["Organiser", name(e.organizer)], ["Invited", going]]);
+  if (e.method === "request") {
+    const b = el("button", "", "Respond in Gmail");
+    b.title = "Open this conversation in Gmail, where you can accept or decline";
+    b.onclick = () => replyInGmail();
+    card.append(b);
+  }
+  return card;
+}
+
+/** A date the sender wrote, shown as the clock there reads: a flight leaves at local time. */
+function wallTime(v) {
+  const p = v.match(/^(\d{4})-(\d\d)-(\d\d)(?:T(\d\d):(\d\d))?/);
+  if (!p) return v;
+  const d = new Date(Date.UTC(+p[1], p[2] - 1, +p[3], +(p[4] || 0), +(p[5] || 0)));
+  const o = { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", year: "numeric" };
+  return p[4] ? d.toLocaleString([], { ...o, hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString([], o);
+}
+
+function bookingCard(c) {
+  const card = el("div", "card");
+  if (c.title) card.append(el("div", "title", c.title));
+  cardRows(card, c.rows.map(r => [r.label, r.time ? wallTime(r.value) : r.value]));
+  for (const a of c.actions) {
+    const b = el("button", "", a.label);
+    b.append(el("span", "host", host(a.url)));
+    b.title = a.url;
+    b.onclick = () => openExternal(a.url);
+    card.append(b);
+  }
+  return card;
+}
+
 /** Everything known about whether a message's sender is genuine. */
 function senderDetails(m) {
-  const t = m.trust, d = $("#trust-dialog");
+  const group = m.facts?.group;
+  const t = senderTrust(m) || { level: "none", dkim: [], raw: "" }, d = $("#trust-dialog");
   const words = { pass: "Passed", fail: "Failed", softfail: "Failed (soft)", none: "Not set up by the sender", neutral: "Inconclusive",
     temperror: "Couldn't be checked", permerror: "Sender's record is broken", policy: "Rejected by policy" };
   const say = r => words[r] || r || "No result";
@@ -560,6 +747,7 @@ function senderDetails(m) {
   const table = el("table");
   const row = (k, v, cls) => { const r = el("tr"); r.append(el("td", "", k), el("td", cls || "", v)); table.append(r); };
   row("From", m.from_name ? `${m.from_name} <${m.from_addr}>` : m.from_addr);
+  if (group) row("Sent through", `the Google Group ${group.address}` + (group.rewritten ? ". The checks below are the ones the group made on the sender." : ""));
   if (t.reply_to) row("Replies go to", t.reply_to, "warn");
   if (t.name_address) row("Name claims", t.name_address, "warn");
   if (!none) {
@@ -577,7 +765,7 @@ function senderDetails(m) {
     body.append(el("p", "note", "These are Gmail's own checks, recorded when the message arrived. A pass means the message "
       + `really came from ${t.domain || "that domain"}; it says nothing about whether that domain is one you should trust, so read it carefully.`));
     const raw = el("details");
-    raw.append(el("summary", "", "Gmail's record"), el("pre", "", t.raw.replace(/;\s*/g, ";\n  ")));
+    raw.append(el("summary", "", group?.rewritten ? "The group's record" : "Gmail's record"), el("pre", "", t.raw.replace(/;\s*/g, ";\n  ")));
     body.append(raw);
   }
   d.showModal();
@@ -656,7 +844,24 @@ function fill(node, m) {
   const poll = setInterval(() => (f.isConnected ? setup() : clearInterval(poll)), 40);
   f.addEventListener("load", setup);
   const view = node.dataset.view || "html";
-  f.src = `/api/message/${m.id}/html?v=${BUILD}` + (view === "html" ? "" : "&view=" + view);
+  const pictures = m.pictures || node.dataset.pictures === "1";
+  f.src = `/api/message/${m.id}/html?v=${BUILD}` + (view === "html" ? (pictures ? "&pictures=true" : "") : "&view=" + view);
+  if (view === "html") {
+    if (m.facts?.remote_images && !pictures) {
+      const bar = el("div", "picbar");
+      const once = el("button", "", "Show"), always = el("button", "", "Always from " + (m.from_name || m.from_addr));
+      once.onclick = () => showPictures(node, m);
+      always.onclick = () => alwaysPictures(m, true);
+      always.title = `Always show pictures in mail from ${m.from_addr}`;
+      bar.append(el("span", "", "Pictures hidden, so the sender can't tell you opened this."), once, always);
+      content.append(bar);
+    }
+    // what the message says about itself in a form a program can read, unless it may be forged
+    if (senderTrust(m)?.level !== "failed") {
+      if (m.facts?.event) content.append(eventCard(m.facts.event));
+      for (const c of m.facts?.cards || []) content.append(bookingCard(c));
+    }
+  }
   content.append(f);
   if (m.attachments.length) {
     const files = el("div", "files");
@@ -962,10 +1167,9 @@ let gPending = 0, starPending = 0;
 function goInbox() {
   $("#search").value = "";
   state.q = "";
-  state.unreadOnly = false;
+  state.unreadOnly = state.peopleOnly = false;
   state.kept = new Set();
-  $("#unread-only").classList.remove("on");
-  $("#unread-only").setAttribute("aria-pressed", false);
+  showListFilters();
   setFilter(null);   // also leaves any set the assistant was showing
 }
 
@@ -1046,7 +1250,8 @@ function onKey(e) {
       break;
     }
     case "r": replyInGmail(); break;
-    case "f": setUnreadOnly(!state.unreadOnly); break;
+    case "f": setListFilter("unreadOnly", !state.unreadOnly); break;
+    case "F": setListFilter("peopleOnly", !state.peopleOnly); break;
     case "/": $("#search").focus(); $("#search").select(); break;
     case "?": $("#help-dialog").showModal(); break;
     case "g": gPending = Date.now(); break;
@@ -1093,7 +1298,8 @@ function renderSync() {
 function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
 $("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
-$("#unread-only").onclick = e => { e.currentTarget.blur(); setUnreadOnly(!state.unreadOnly); };
+$("#unread-only").onclick = e => { e.currentTarget.blur(); setListFilter("unreadOnly", !state.unreadOnly); };
+$("#people-only").onclick = e => { e.currentTarget.blur(); setListFilter("peopleOnly", !state.peopleOnly); };
 $("#help").onclick = () => $("#help-dialog").showModal();
 // The same dialog adds an account or, given one, replaces its saved app password.
 function openAccountDialog(acct) {
@@ -1286,9 +1492,8 @@ $("#as-setup").addEventListener("submit", async e => {
 /** The assistant picked a set of conversations: put it in the list. */
 function showCollection(title) {
   state.collection = { title };
-  state.unreadOnly = false;
-  $("#unread-only").classList.remove("on");
-  $("#unread-only").setAttribute("aria-pressed", false);
+  state.unreadOnly = state.peopleOnly = false;
+  showListFilters();
   state.q = "";
   $("#search").value = "";
   state.filter = null;
