@@ -217,7 +217,8 @@ body.solo .view h1, body.solo .view .messages { max-width: none; }
 .empty { color: var(--muted); text-align: center; padding: 70px 20px; }
 
 /* ---- conversation view ---- */
-#thread-bar { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex: none; }
+#thread-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex: none; }
+#thread-bar button { white-space: nowrap; }
 #views { flex: 1; min-height: 0; position: relative; }
 #pane-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
 body.reading #pane-empty { display: none; }
