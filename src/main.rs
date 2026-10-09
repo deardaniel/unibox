@@ -311,10 +311,9 @@ fn router(app: Arc<App>) -> Router {
 }
 
 // ---- window --------------------------------------------------------------
-/// Show the UI in a chromeless Edge (or Chrome) window with its own profile, and
-/// return the browser process so the app can quit when that window closes.
+/// Show the UI in a chromeless Edge (or Chrome) window with its own profile.
 #[cfg(windows)]
-fn open_window(url: &str, dir: &std::path::Path) -> Option<std::process::Child> {
+fn open_window(url: &str, dir: &std::path::Path) {
     let roots = ["ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"];
     let exes = ["Microsoft\\Edge\\Application\\msedge.exe", "Google\\Chrome\\Application\\chrome.exe"];
     for exe in exes {
@@ -327,21 +326,32 @@ fn open_window(url: &str, dir: &std::path::Path) -> Option<std::process::Child> 
             let child = std::process::Command::new(path)
                 .arg(format!("--app={url}"))
                 .arg(format!("--user-data-dir={}", dir.join("window").display()))
-                .args(["--no-first-run", "--no-default-browser-check", "--window-size=1280,860"])
+                .args(["--no-first-run", "--no-default-browser-check", "--disable-background-mode"])
+                .arg("--window-size=1280,860")
                 .spawn();
-            if let Ok(child) = child {
-                return Some(child);
+            if child.is_ok() {
+                return;
             }
         }
     }
     let _ = std::process::Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]).spawn();
-    None
 }
 
 #[cfg(not(windows))]
-fn open_window(url: &str, _dir: &std::path::Path) -> Option<std::process::Child> {
+fn open_window(url: &str, _dir: &std::path::Path) {
     println!("Unibox is running at {url}");
-    None
+}
+
+/// Resolves once no window has been connected for a little while. The browser process
+/// we start is no guide: if that profile is already running it hands over and exits at
+/// once. An open window always holds /api/events, so that is what we watch.
+async fn until_windows_close(app: Arc<App>) {
+    tokio::time::sleep(std::time::Duration::from_secs(20)).await; // time for the window to come up
+    let mut idle = 0;
+    while idle < 5 {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        idle = if app.events.receiver_count() == 0 { idle + 1 } else { 0 };
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -374,17 +384,16 @@ fn main() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async move {
         let listener = tokio::net::TcpListener::from_std(listener)?;
-        let server = axum::serve(listener, router(app));
+        let server = axum::serve(listener, router(app.clone()));
         if serve_only {
             println!("Unibox is running at {url}");
             server.await?;
-        } else if let Some(mut window) = open_window(&url, &dir) {
+        } else {
+            open_window(&url, &dir);
             tokio::select! {
                 r = server => r?,
-                _ = tokio::task::spawn_blocking(move || window.wait()) => {}
+                _ = until_windows_close(app) => {}
             }
-        } else {
-            server.await?;
         }
         Ok::<_, anyhow::Error>(())
     })

@@ -9,8 +9,12 @@ SYS=/mnt/c/Windows/System32
 LOCAL=$(wslpath "$($SYS/cmd.exe /c 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '\r')")
 DEST="$LOCAL/Programs/Unibox"
 mkdir -p "$DEST"
-# a running copy keeps the file locked
+# A running copy keeps the file locked, and its window would go on showing the old interface.
 $SYS/taskkill.exe /IM unibox.exe /F >/dev/null 2>&1 || true
+$SYS/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command '
+  Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -match "^(msedge|chrome)\.exe$" -and $_.CommandLine -like "*\Unibox\window*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' >/dev/null 2>&1 || true
 sleep 1
 cp target/x86_64-pc-windows-gnullvm/release/unibox.exe "$DEST/unibox.exe"
 $SYS/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command '
