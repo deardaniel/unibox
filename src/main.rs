@@ -553,7 +553,8 @@ mod window {
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::{Mutex, OnceLock};
-    use tao::dpi::LogicalSize;
+    use std::time::{Duration, Instant};
+    use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
     use tao::event::{Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
     use tao::window::{Icon, Theme, Window, WindowBuilder, WindowId};
@@ -619,12 +620,14 @@ mod window {
         origin: &str,
         url: &str,
         size: (f64, f64),
+        visible: bool,
     ) -> anyhow::Result<(WebView, Window)> {
         let window = WindowBuilder::new()
             .with_title("Unibox")
             .with_inner_size(LogicalSize::new(size.0, size.1))
             .with_min_inner_size(LogicalSize::new(560.0, 400.0))
             .with_window_icon(icon())
+            .with_visible(visible)
             .build(target)?;
         let id = window.id();
         // Match the page colour so a resize never flashes white around the edges.
@@ -655,6 +658,53 @@ mod window {
         Ok((webview, window))
     }
 
+    /// The main window's place on screen as last saved: (x, y, width, height, maximized).
+    fn saved_place(file: &Path) -> Option<((i32, i32, i32, i32), bool)> {
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+        let n = |k: &str| v.get(k)?.as_i64().map(|n| n as i32);
+        Some(((n("x")?, n("y")?, n("w")?, n("h")?), v.get("maximized")?.as_bool()?))
+    }
+
+    /// Remember where the main window is. While it is maximized only that fact is saved, so
+    /// un-maximizing next time goes back to the size it had before; minimized is ignored.
+    fn save_place(window: &Window, file: &Path) {
+        if window.is_minimized() {
+            return;
+        }
+        let mut place = saved_place(file).map(|(p, _)| p);
+        let maximized = window.is_maximized();
+        if !maximized || place.is_none() {
+            if let Ok(pos) = window.outer_position() {
+                let size = window.outer_size();
+                place = Some((pos.x, pos.y, size.width as i32, size.height as i32));
+            }
+        }
+        if let Some((x, y, w, h)) = place {
+            let json = serde_json::json!({ "x": x, "y": y, "w": w, "h": h, "maximized": maximized });
+            let _ = std::fs::write(file, json.to_string());
+        }
+    }
+
+    /// Put the main window back where it was, if that is still on a screen.
+    fn restore_place(window: &Window, file: &Path) {
+        let Some((saved, maximized)) = saved_place(file) else { return };
+        let screens: Vec<_> = window
+            .available_monitors()
+            .map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32))
+            .collect();
+        if let Some((x, y, w, h)) = super::place_window(saved, &screens) {
+            window.set_outer_position(PhysicalPosition::new(x, y));
+            // sizes are saved with the frame; take it off again
+            let frame = window.outer_size();
+            let inner = window.inner_size();
+            let (fw, fh) = (frame.width.saturating_sub(inner.width), frame.height.saturating_sub(inner.height));
+            window.set_inner_size(PhysicalSize::new((w as u32).saturating_sub(fw), (h as u32).saturating_sub(fh)));
+        }
+        if maximized {
+            window.set_maximized(true);
+        }
+    }
+
     /// Show the UI in a window of its own and run until that window is closed. Returns an
     /// error only if the window could not be created at all.
     pub fn run(url: &str, dir: &Path) -> anyhow::Result<()> {
@@ -662,14 +712,36 @@ mod window {
         let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
         let mut context = WebContext::new(Some(dir.join("webview")));
         let origin = url.to_string();
-        let main = make_window(&event_loop, &mut context, &origin, url, (1320.0, 880.0))?;
+        let main = make_window(&event_loop, &mut context, &origin, url, (1320.0, 880.0), false)?;
         let main_id = main.1.id();
+        let place_file = dir.join("window.json");
+        restore_place(&main.1, &place_file);
+        main.1.set_visible(true);
+        // Set when the main window moves or is resized; its place is written out once that
+        // settles (and not only on close, so it survives the app being killed).
+        let mut save_at: Option<Instant> = None;
         let mut windows: HashMap<WindowId, (WebView, Window)> = HashMap::from([(main_id, main)]);
         event_loop.run(move |event, target, control_flow| {
-            *control_flow = ControlFlow::Wait;
+            if save_at.is_some_and(|t| Instant::now() >= t) {
+                save_at = None;
+                if let Some((_, w)) = windows.get(&main_id) {
+                    save_place(w, &place_file);
+                }
+            }
+            *control_flow = save_at.map_or(ControlFlow::Wait, ControlFlow::WaitUntil);
             match event {
+                Event::WindowEvent { window_id, event: WindowEvent::Moved(_) | WindowEvent::Resized(_), .. }
+                    if window_id == main_id =>
+                {
+                    let at = Instant::now() + Duration::from_millis(400);
+                    save_at = Some(at);
+                    *control_flow = ControlFlow::WaitUntil(at);
+                }
                 Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. } => {
                     if window_id == main_id {
+                        if let Some((_, w)) = windows.get(&main_id) {
+                            save_place(w, &place_file);
+                        }
                         *control_flow = ControlFlow::Exit;
                     } else {
                         windows.remove(&window_id);
@@ -682,7 +754,7 @@ mod window {
                     }
                 }
                 Event::UserEvent(UserEvent::Open(url)) => {
-                    match make_window(target, &mut context, &origin, &url, (920.0, 860.0)) {
+                    match make_window(target, &mut context, &origin, &url, (920.0, 860.0), true) {
                         Ok(w) => drop(windows.insert(w.1.id(), w)),
                         Err(e) => eprintln!("window: {e:#}"),
                     }
@@ -696,6 +768,51 @@ mod window {
                 _ => {}
             }
         })
+    }
+}
+
+/// Where to put a window that was last at `saved` (x, y, width, height in screen pixels),
+/// given the screens there are now (same form). The size is capped to the screen it lands
+/// on and the window is nudged fully onto it; `None` if it was on a screen that is gone,
+/// in which case the system should place it afresh.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn place_window(saved: (i32, i32, i32, i32), screens: &[(i32, i32, i32, i32)]) -> Option<(i32, i32, i32, i32)> {
+    let (x, y, w, h) = saved;
+    let overlap = |s: &(i32, i32, i32, i32)| {
+        let ox = ((x + w).min(s.0 + s.2) - x.max(s.0)).max(0) as i64;
+        let oy = ((y + h).min(s.1 + s.3) - y.max(s.1)).max(0) as i64;
+        ox * oy
+    };
+    // the screen holding most of the window
+    let screen = screens.iter().max_by_key(|s| overlap(s)).filter(|s| overlap(s) > 0)?;
+    let (w, h) = (w.min(screen.2), h.min(screen.3));
+    let x = x.clamp(screen.0, screen.0 + screen.2 - w);
+    let y = y.clamp(screen.1, screen.1 + screen.3 - h);
+    Some((x, y, w, h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::place_window;
+
+    #[test]
+    fn windows_come_back_on_screen() {
+        let one = [(0, 0, 1920, 1080)];
+        let two = [(0, 0, 1920, 1080), (1920, 0, 2560, 1440)];
+        // fits: unchanged
+        assert_eq!(place_window((100, 80, 1300, 900), &one), Some((100, 80, 1300, 900)));
+        // on the second screen, which is still there
+        assert_eq!(place_window((2500, 200, 1300, 900), &two), Some((2500, 200, 1300, 900)));
+        // the second screen is gone
+        assert_eq!(place_window((2500, 200, 1300, 900), &one), None);
+        // hanging off the right and bottom edges: pulled back in
+        assert_eq!(place_window((1500, 700, 1300, 900), &one), Some((620, 180, 1300, 900)));
+        // off the top left
+        assert_eq!(place_window((-200, -50, 1300, 900), &one), Some((0, 0, 1300, 900)));
+        // bigger than the screen now is
+        assert_eq!(place_window((0, 0, 3000, 2000), &one), Some((0, 0, 1920, 1080)));
+        // straddling two screens goes to the one holding more of it
+        assert_eq!(place_window((1800, 100, 1000, 800), &two), Some((1920, 100, 1000, 800)));
     }
 }
 
