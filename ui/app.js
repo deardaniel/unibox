@@ -176,39 +176,55 @@ function renderAccounts() {
     : last ? "Synced " + fmtDate(last) : state.accounts.length ? "Syncing…" : "";
 }
 
-// Drag an account up or down the sidebar to reorder it. The rows move as you drag; the order
-// is saved on release (it also decides which account the 1-9 keys pick).
+// Drag an account up or down the sidebar to reorder it. Nothing moves in the DOM while
+// dragging (that would drop the pointer capture): the row follows the pointer and the others
+// slide out of its way with transforms. The order is saved on release (it also decides which
+// account the 1-9 keys pick).
 function dragAccount(down, b) {
   if (down.button !== 0 || down.target.closest(".rm, .pw")) return;
   const nav = $("#accounts");
-  let dragging = false;
+  const rows = [...nav.querySelectorAll(".acct[data-id]")];
+  const from = rows.indexOf(b);
+  if (rows.length < 2) return;
+  const step = rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top;
+  let dragging = false, to = from;
   const move = e => {
     if (!dragging) {
       if (Math.abs(e.clientY - down.clientY) < 5) return;
       dragging = true;
       b.setPointerCapture(down.pointerId);
       b.classList.add("dragging");
+      nav.classList.add("sorting");
     }
-    for (const o of nav.querySelectorAll(".acct[data-id]")) {
-      if (o === b) continue;
-      const r = o.getBoundingClientRect(), mid = r.top + r.height / 2;
-      const before = o.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;   // o sits above b
-      if (before && e.clientY < mid) { nav.insertBefore(b, o); break; }
-      if (!before && e.clientY > mid) nav.insertBefore(b, o.nextSibling);
-    }
+    const dy = Math.max(-from * step, Math.min((rows.length - 1 - from) * step, e.clientY - down.clientY));
+    b.style.transform = `translateY(${dy}px)`;
+    to = from + Math.round(dy / step);
+    rows.forEach((o, j) => {
+      if (o === b) return;
+      const shift = j > from && j <= to ? -step : j < from && j >= to ? step : 0;
+      o.style.transform = shift ? `translateY(${shift}px)` : "";
+    });
   };
   const up = () => {
     b.removeEventListener("pointermove", move);
     b.removeEventListener("pointerup", up);
     b.removeEventListener("pointercancel", up);
     if (!dragging) return;
-    b.classList.remove("dragging");
     b.dataset.dragged = 1;                      // swallow the click that follows the release
     setTimeout(() => delete b.dataset.dragged, 0);
-    const ids = [...nav.querySelectorAll(".acct[data-id]")].map(o => +o.dataset.id);
-    state.accounts.sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id));
-    renderAccounts();
-    api("/api/accounts/order", { body: { ids } }).catch(() => refresh());
+    // let go: the row settles into its slot, then the list is rebuilt in the new order
+    b.classList.add("settling");
+    b.style.transform = `translateY(${(to - from) * step}px)`;
+    setTimeout(() => {
+      b.classList.remove("dragging");
+      nav.classList.remove("sorting");
+      if (to !== from) {
+        const moved = state.accounts.splice(from, 1)[0];
+        state.accounts.splice(to, 0, moved);
+        api("/api/accounts/order", { body: { ids: state.accounts.map(a => a.id) } }).catch(() => refresh());
+      }
+      renderAccounts();
+    }, 140);
   };
   b.addEventListener("pointermove", move);
   b.addEventListener("pointerup", up);
