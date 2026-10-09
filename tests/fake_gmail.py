@@ -184,9 +184,9 @@ class Handler(socketserver.StreamRequestHandler):
                     self.send(f"{tag} OK Success\r\n")
                 elif cmd == "UID SEARCH":
                     msgs = self.visible(user, selected)
-                    m = re.search(r"X-GM-THRID (\d+)", args)
-                    if m:
-                        hits = [u for u, x in msgs.items() if x.thrid == m.group(1)]
+                    thrids = set(re.findall(r"X-GM-THRID (\d+)", args))
+                    if thrids:
+                        hits = [u for u, x in msgs.items() if x.thrid in thrids]
                     elif "has:attachment" in args:
                         hits = [u for u, x in msgs.items() if b"filename=" in x.raw]
                     else:

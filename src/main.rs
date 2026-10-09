@@ -65,8 +65,12 @@ fn asset(name: &str, built_in: &'static str) -> String {
         .unwrap_or_else(|| built_in.to_string())
 }
 
+/// Bump when the way messages are rendered changes, so cached copies in the window are dropped.
+const RENDER_VERSION: &str = "2";
+
 async fn index() -> impl IntoResponse {
-    ([(header::CACHE_CONTROL, "no-cache")], Html(asset("index.html", include_str!("../ui/index.html"))))
+    let html = asset("index.html", include_str!("../ui/index.html")).replace("__BUILD__", RENDER_VERSION);
+    ([(header::CACHE_CONTROL, "no-cache")], Html(html))
 }
 async fn app_js() -> impl IntoResponse {
     (
@@ -139,39 +143,40 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
     Ok(Json(blocking(move || app.db.threads(q.account, q.q.trim(), 60, q.offset.max(0))).await?))
 }
 
+#[derive(Deserialize)]
+struct ThreadOptions {
+    /// Set when the UI is only rendering ahead of time: answer from the cache, don't call Gmail.
+    #[serde(default)]
+    peek: bool,
+}
+
 async fn get_thread(
     State(app): State<Arc<App>>,
     Path((account_id, thrid)): Path<(i64, String)>,
+    Query(options): Query<ThreadOptions>,
 ) -> Api<Json<serde_json::Value>> {
-    // Top up the conversation from All Mail in the background; the UI hears about it over /api/events.
-    let (bg, bg_thrid) = (app.clone(), thrid.clone());
-    tokio::task::spawn_blocking(move || {
-        if let Err(e) = bg.hydrate_thread(account_id, &bg_thrid) {
-            eprintln!("thread {bg_thrid}: {e:#}");
-            bg.emit("error", &format!("Couldn't load the full conversation: {e:#}"));
-        }
-    });
+    if !options.peek {
+        // Re-check All Mail in the background; the UI hears about anything new over /api/events.
+        let (bg, bg_thrid) = (app.clone(), thrid.clone());
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = bg.hydrate_thread(account_id, &bg_thrid) {
+                eprintln!("thread {bg_thrid}: {e:#}");
+                bg.emit("error", &format!("Couldn't load the full conversation: {e:#}"));
+            }
+        });
+    }
     let out = blocking(move || {
-        let rows = app.db.thread_messages(account_id, &thrid)?;
-        let mut messages = Vec::new();
-        for m in rows {
-            let attachments = match app.db.raw_body(m.id)? {
-                Some(raw) => mime::attachments(&raw),
-                None => Vec::new(),
-            };
-            let mut v = serde_json::to_value(&m)?;
-            v["attachments"] = serde_json::to_value(attachments)?;
-            messages.push(v);
-        }
-        Ok(serde_json::json!({ "messages": messages }))
+        Ok(serde_json::json!({ "messages": app.db.thread_messages(account_id, &thrid)? }))
     })
     .await?;
     Ok(Json(out))
 }
 
 /// Headers for anything that came out of an email: never let it act as part of the app.
-fn untrusted(mime: &str) -> [(header::HeaderName, HeaderValue); 3] {
+/// A stored message never changes, so the window may keep its copy.
+fn untrusted(mime: &str) -> [(header::HeaderName, HeaderValue); 4] {
     [
+        (header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=2592000, immutable")),
         (header::CONTENT_TYPE, HeaderValue::from_str(mime).unwrap_or(HeaderValue::from_static("application/octet-stream"))),
         (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
         (

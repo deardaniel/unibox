@@ -32,6 +32,9 @@ pub struct ThreadRow {
     pub unread: i64,
     pub starred: bool,
     pub has_attach: bool,
+    /// Sender of the newest message, for the avatar.
+    pub from_name: String,
+    pub from_addr: String,
 }
 
 #[derive(Serialize)]
@@ -48,6 +51,7 @@ pub struct MessageRow {
     pub starred: bool,
     pub in_inbox: bool,
     pub has_body: bool,
+    pub attachments: serde_json::Value,
 }
 
 /// Header-level facts about a message, as found on the server.
@@ -112,8 +116,22 @@ impl Db {
              CREATE TABLE IF NOT EXISTS pending(
                account_id INTEGER NOT NULL,
                gm_msgid TEXT NOT NULL,
-               PRIMARY KEY(account_id, gm_msgid));",
+               PRIMARY KEY(account_id, gm_msgid));
+             -- Conversations whose other messages (sent replies, archived mail) have been
+             -- pulled from All Mail already.
+             CREATE TABLE IF NOT EXISTS hydrated(
+               account_id INTEGER NOT NULL,
+               gm_thrid TEXT NOT NULL,
+               PRIMARY KEY(account_id, gm_thrid));",
         )?;
+        let has_column = |name: &str| -> Result<bool> {
+            let mut st = c.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name=?")?;
+            Ok(st.exists([name])?)
+        };
+        if !has_column("attachments")? {
+            // JSON list of attachments, filled in when the body is stored
+            c.execute("ALTER TABLE messages ADD COLUMN attachments TEXT", [])?;
+        }
         c.execute("DELETE FROM pending", [])?; // nothing survives a restart mid-flight
         Ok(db)
     }
@@ -164,6 +182,7 @@ impl Db {
     pub fn remove_account(&self, id: i64) -> Result<()> {
         let c = self.conn()?;
         c.execute("DELETE FROM pending WHERE account_id=?", [id])?;
+        c.execute("DELETE FROM hydrated WHERE account_id=?", [id])?;
         c.execute("DELETE FROM accounts WHERE id=?", [id])?;
         Ok(())
     }
@@ -199,7 +218,7 @@ impl Db {
         raw: &[u8],
         snippet: &str,
         body_text: &str,
-        has_attach: bool,
+        attachments: &str,
     ) -> Result<()> {
         let id: Option<i64> = c
             .query_row(
@@ -211,8 +230,8 @@ impl Db {
         let Some(id) = id else { return Ok(()) };
         c.execute("INSERT OR REPLACE INTO bodies(message_id, raw) VALUES(?,?)", params![id, raw])?;
         c.execute(
-            "UPDATE messages SET has_body=1, snippet=?, body_text=?, has_attach=? WHERE id=?",
-            params![snippet, body_text, has_attach, id],
+            "UPDATE messages SET has_body=1, snippet=?, body_text=?, attachments=?, has_attach=? WHERE id=?",
+            params![snippet, body_text, attachments, attachments != "[]", id],
         )?;
         Ok(())
     }
@@ -235,7 +254,7 @@ impl Db {
                           FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid
                          GROUP BY n ORDER BY MIN(t.date))),
                     (SELECT COUNT(*) FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid),
-                    SUM(seen=0), SUM(starred)>0, SUM(has_attach)>0
+                    SUM(seen=0), SUM(starred)>0, SUM(has_attach)>0, from_name, from_addr
                FROM messages m
               WHERE in_inbox=1
                 AND (?1 IS NULL OR account_id=?1)
@@ -258,6 +277,8 @@ impl Db {
                 unread: r.get(7)?,
                 starred: r.get(8)?,
                 has_attach: r.get(9)?,
+                from_name: r.get(10)?,
+                from_addr: r.get(11)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -266,7 +287,8 @@ impl Db {
     pub fn thread_messages(&self, account_id: i64, thrid: &str) -> Result<Vec<MessageRow>> {
         let c = self.conn()?;
         let mut st = c.prepare(
-            "SELECT id, date, from_name, from_addr, to_addrs, cc_addrs, subject, snippet, seen, starred, in_inbox, has_body
+            "SELECT id, date, from_name, from_addr, to_addrs, cc_addrs, subject, snippet, seen, starred, in_inbox,
+                    has_body, attachments
                FROM messages WHERE account_id=? AND gm_thrid=? ORDER BY date, id",
         )?;
         let rows = st.query_map(params![account_id, thrid], |r| {
@@ -283,8 +305,62 @@ impl Db {
                 starred: r.get(9)?,
                 in_inbox: r.get(10)?,
                 has_body: r.get(11)?,
+                attachments: r
+                    .get::<_, Option<String>>(12)?
+                    .and_then(|j| serde_json::from_str(&j).ok())
+                    .unwrap_or_else(|| serde_json::json!([])),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Inbox conversations not yet topped up from All Mail, newest first.
+    pub fn unhydrated_threads(&self, account_id: i64, limit: i64) -> Result<Vec<String>> {
+        let c = self.conn()?;
+        let mut st = c.prepare(
+            "SELECT gm_thrid FROM messages m
+              WHERE account_id=?1 AND in_inbox=1
+                AND NOT EXISTS (SELECT 1 FROM hydrated h WHERE h.account_id=?1 AND h.gm_thrid=m.gm_thrid)
+              GROUP BY gm_thrid ORDER BY MAX(date) DESC LIMIT ?2",
+        )?;
+        let rows = st.query_map(params![account_id, limit], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn mark_hydrated(&self, account_id: i64, thrids: &[String]) -> Result<()> {
+        let c = self.conn()?;
+        for t in thrids {
+            c.execute("INSERT OR IGNORE INTO hydrated(account_id, gm_thrid) VALUES(?,?)", params![account_id, t])?;
+        }
+        Ok(())
+    }
+
+    /// Message ids in these conversations whose bodies we already hold.
+    pub fn bodies_held(&self, account_id: i64, thrids: &[String]) -> Result<std::collections::HashSet<String>> {
+        let c = self.conn()?;
+        let mut out = std::collections::HashSet::new();
+        let mut st = c.prepare("SELECT gm_msgid FROM messages WHERE account_id=? AND gm_thrid=? AND has_body=1")?;
+        for t in thrids {
+            for r in st.query_map(params![account_id, t], |r| r.get::<_, String>(0))? {
+                out.insert(r?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Stored messages that predate the attachments column: (id, raw).
+    pub fn bodies_missing_attachments(&self) -> Result<Vec<i64>> {
+        let c = self.conn()?;
+        let mut st = c.prepare("SELECT id FROM messages WHERE has_body=1 AND attachments IS NULL")?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_attachments(&self, message_id: i64, attachments: &str) -> Result<()> {
+        self.conn()?.execute(
+            "UPDATE messages SET attachments=?, has_attach=? WHERE id=?",
+            params![attachments, attachments != "[]", message_id],
+        )?;
+        Ok(())
     }
 }

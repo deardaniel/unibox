@@ -15,10 +15,14 @@ use tokio::sync::broadcast;
 const HEADER_ITEMS: &str = "(UID X-GM-MSGID X-GM-THRID FLAGS INTERNALDATE RFC822.SIZE \
                             BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT)])";
 const FULL_ITEMS: &str = "(UID X-GM-MSGID X-GM-THRID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])";
-/// Bodies are fetched ahead of time for the newest inbox messages; the rest load when opened.
-const PREFETCH_BODIES: i64 = 400;
-const MAX_PREFETCH_SIZE: i64 = 8 * 1024 * 1024;
+/// Everything in the inbox is downloaded ahead of time, except messages bigger than this,
+/// which load when opened.
+const MAX_PREFETCH_SIZE: i64 = 25 * 1024 * 1024;
 const SYNC_EVERY: Duration = Duration::from_secs(120);
+/// How long one pass may spend preloading before it goes back to check for new mail.
+const PRELOAD_BUDGET: Duration = Duration::from_secs(40);
+/// How often opening a conversation re-checks All Mail for replies sent from elsewhere.
+const REHYDRATE_AFTER: Duration = Duration::from_secs(600);
 
 pub struct App {
     pub db: Db,
@@ -29,6 +33,9 @@ pub struct App {
     /// a local change is pushed, so the two can never interleave.
     locks: Mutex<HashMap<i64, Arc<Mutex<()>>>>,
     hydrated: Mutex<HashMap<(i64, String), Instant>>,
+    /// Conversations opened by hand are topped up one at a time, so paging quickly
+    /// through the list cannot open a pile of connections to Gmail.
+    hydrating: Mutex<()>,
     wake: Mutex<Option<mpsc::Sender<()>>>,
 }
 
@@ -41,6 +48,7 @@ impl App {
             events: broadcast::channel(64).0,
             locks: Mutex::new(HashMap::new()),
             hydrated: Mutex::new(HashMap::new()),
+            hydrating: Mutex::new(()),
             wake: Mutex::new(None),
         })
     }
@@ -75,22 +83,39 @@ impl App {
         let (tx, rx) = mpsc::channel();
         *self.wake.lock().unwrap() = Some(tx);
         let app = self.clone();
-        std::thread::spawn(move || loop {
-            for acct in app.db.accounts().unwrap_or_default() {
-                let result = app.sync_account(acct.id, &acct.email);
-                let err = result.as_ref().err().map(|e| format!("{e:#}"));
-                if let Some(e) = &err {
-                    eprintln!("sync {}: {e}", acct.email);
+        std::thread::spawn(move || {
+            app.backfill_attachments();
+            loop {
+                let mut more = false;
+                for acct in app.db.accounts().unwrap_or_default() {
+                    let result = app.sync_account(acct.id, &acct.email);
+                    let err = result.as_ref().err().map(|e| format!("{e:#}"));
+                    if let Some(e) = &err {
+                        eprintln!("sync {}: {e}", acct.email);
+                    }
+                    more |= result.unwrap_or(false);
+                    let _ = app.db.set_sync_result(acct.id, err.as_deref());
+                    app.emit("synced", &acct.email);
                 }
-                let _ = app.db.set_sync_result(acct.id, err.as_deref());
-                app.emit("synced", &acct.email);
+                // While there is still mail to preload, go straight round again.
+                let _ = rx.recv_timeout(if more { Duration::from_millis(200) } else { SYNC_EVERY });
+                while rx.try_recv().is_ok() {} // collapse a burst of requests into one pass
             }
-            let _ = rx.recv_timeout(SYNC_EVERY);
-            while rx.try_recv().is_ok() {} // collapse a burst of requests into one pass
         });
     }
 
-    fn sync_account(&self, account_id: i64, email: &str) -> Result<()> {
+    /// Messages stored before attachment lists were kept alongside them.
+    fn backfill_attachments(&self) {
+        for id in self.db.bodies_missing_attachments().unwrap_or_default() {
+            if let Ok(Some(raw)) = self.db.raw_body(id) {
+                let _ = self.db.set_attachments(id, &mime::attachments_json(&raw));
+            }
+        }
+    }
+
+    /// One pass over an account. Returns true if preloading ran out of time and wants another go.
+    fn sync_account(&self, account_id: i64, email: &str) -> Result<bool> {
+        let deadline = Instant::now() + PRELOAD_BUDGET;
         let mut imap = self.connect(email)?;
         let exists = imap.select("INBOX", false)?;
         let new_uids = {
@@ -123,35 +148,120 @@ impl App {
             }
         }
 
-        // Bodies, a few at a time, so snippets appear and opening a message is instant.
+        // Bodies, a few at a time, newest first, so snippets appear and opening is instant.
+        let mut gave_nothing: HashSet<u32> = HashSet::new();
+        let mut batches = 0;
         loop {
             let want: Vec<u32> = {
                 let c = self.db.conn()?;
                 let mut st = c.prepare(
-                    "SELECT uid FROM (SELECT uid, has_body, size FROM messages
-                                       WHERE account_id=? AND in_inbox=1 AND uid IS NOT NULL
-                                       ORDER BY date DESC LIMIT ?)
-                      WHERE has_body=0 AND size<=? LIMIT 12",
+                    "SELECT uid FROM messages
+                      WHERE account_id=? AND in_inbox=1 AND uid IS NOT NULL AND has_body=0 AND size<=?
+                      ORDER BY date DESC LIMIT 200",
                 )?;
-                let rows = st.query_map(params![account_id, PREFETCH_BODIES, MAX_PREFETCH_SIZE], |r| r.get(0))?;
-                rows.collect::<rusqlite::Result<_>>()?
+                let rows = st.query_map(params![account_id, MAX_PREFETCH_SIZE], |r| r.get::<_, u32>(0))?;
+                rows.filter_map(|r| r.ok()).filter(|u| !gave_nothing.contains(u)).take(12).collect()
             };
             if want.is_empty() {
                 break;
             }
+            if Instant::now() > deadline {
+                imap.logout();
+                self.emit("changed", email);
+                return Ok(true);
+            }
             let fetched = imap.uid_fetch(&uid_set(&want), FULL_ITEMS)?;
             let c = self.db.conn()?;
-            let mut stored = 0;
+            let mut got = HashSet::new();
             for f in &fetched {
-                stored += store_fetched_body(&c, account_id, f)? as usize;
+                if store_fetched_body(&c, account_id, f)? {
+                    got.extend(fetched_uid(f));
+                }
             }
+            // a message that vanished mid-sync returns nothing; don't ask for it again this pass
+            gave_nothing.extend(want.iter().filter(|u| !got.contains(u)));
+            batches += 1;
+            if batches % 4 == 0 {
+                self.emit("changed", email);
+            }
+        }
+        if batches > 0 {
             self.emit("changed", email);
-            if stored == 0 {
-                break; // the server gave us nothing for these; don't spin
+        }
+
+        // Then the rest of each conversation: replies you sent, earlier archived messages.
+        let mut all_mail_open = false;
+        loop {
+            let thrids = self.db.unhydrated_threads(account_id, 25)?;
+            if thrids.is_empty() {
+                break;
+            }
+            if Instant::now() > deadline {
+                imap.logout();
+                return Ok(true);
+            }
+            if !all_mail_open {
+                let all_mail = imap.all_mail()?;
+                imap.select(&all_mail, true)?;
+                all_mail_open = true;
+            }
+            let added = self.fill_threads(&mut imap, account_id, &thrids, MAX_PREFETCH_SIZE)?;
+            self.db.mark_hydrated(account_id, &thrids)?;
+            if added > 0 {
+                self.emit("changed", email);
             }
         }
         imap.logout();
-        Ok(())
+        Ok(false)
+    }
+
+    /// With All Mail selected, download every message of these conversations that we
+    /// do not hold yet. Returns how many were added.
+    fn fill_threads(&self, imap: &mut Imap, account_id: i64, thrids: &[String], max_size: i64) -> Result<usize> {
+        // "OR a OR b c" is how IMAP spells a three-way OR.
+        let mut criteria = String::new();
+        for (i, t) in thrids.iter().enumerate() {
+            if !t.chars().all(|c| c.is_ascii_digit()) {
+                return Err(anyhow!("bad thread id"));
+            }
+            if i + 1 < thrids.len() {
+                criteria.push_str("OR ");
+            }
+            criteria.push_str(&format!("X-GM-THRID {t} "));
+        }
+        let uids = match imap.uid_search(criteria.trim_end()) {
+            Ok(u) => u,
+            // If Gmail balks at the combined search, ask one conversation at a time.
+            Err(_) if thrids.len() > 1 => {
+                let mut all = Vec::new();
+                for t in thrids {
+                    all.extend(imap.uid_search(&format!("X-GM-THRID {t}"))?);
+                }
+                all
+            }
+            Err(e) => return Err(e),
+        };
+        let have = self.db.bodies_held(account_id, thrids)?;
+        let mut need = Vec::new();
+        for chunk in uids.chunks(500) {
+            for f in imap.uid_fetch(&uid_set(chunk), "(UID X-GM-MSGID RFC822.SIZE)")? {
+                let size: i64 = f.get("RFC822.SIZE").and_then(|s| s.text().parse().ok()).unwrap_or(0);
+                let held = f.get("X-GM-MSGID").is_some_and(|m| have.contains(&m.text()));
+                if !held && size <= max_size {
+                    need.extend(fetched_uid(&f));
+                }
+            }
+        }
+        let mut added = 0;
+        for chunk in need.chunks(8) {
+            let fetched = imap.uid_fetch(&uid_set(chunk), FULL_ITEMS)?;
+            let c = self.db.conn()?;
+            for f in &fetched {
+                insert_fetched(&c, account_id, f, false)?;
+                added += store_fetched_body(&c, account_id, f)? as usize;
+            }
+        }
+        Ok(added)
     }
 
     /// Bring local inbox membership and flags in line with the server's listing.
@@ -209,7 +319,7 @@ impl App {
         let key = (account_id, thrid.to_string());
         {
             let mut seen = self.hydrated.lock().unwrap();
-            if seen.get(&key).is_some_and(|t| t.elapsed() < Duration::from_secs(90)) {
+            if seen.get(&key).is_some_and(|t| t.elapsed() < REHYDRATE_AFTER) {
                 return Ok(());
             }
             seen.insert(key.clone(), Instant::now());
@@ -222,42 +332,19 @@ impl App {
     }
 
     fn hydrate_inner(&self, account_id: i64, thrid: &str) -> Result<()> {
-        if !thrid.chars().all(|c| c.is_ascii_digit()) {
-            return Err(anyhow!("bad thread id"));
-        }
+        let _one_at_a_time = self.hydrating.lock().unwrap();
         let acct = self.db.account(account_id)?.ok_or_else(|| anyhow!("no such account"))?;
         let mut imap = self.connect(&acct.email)?;
         let all_mail = imap.all_mail()?;
         imap.select(&all_mail, true)?;
-        let uids = imap.uid_search(&format!("X-GM-THRID {thrid}"))?;
-        if uids.is_empty() {
-            imap.logout();
-            return Ok(());
-        }
-        // Find out which of these we already hold in full before downloading anything big.
-        let listing = imap.uid_fetch(&uid_set(&uids), "(UID X-GM-MSGID)")?;
-        let have: HashSet<String> = {
-            let c = self.db.conn()?;
-            let mut st =
-                c.prepare("SELECT gm_msgid FROM messages WHERE account_id=? AND gm_thrid=? AND has_body=1")?;
-            let rows = st.query_map(params![account_id, thrid], |r| r.get(0))?;
-            rows.collect::<rusqlite::Result<_>>()?
-        };
-        let need: Vec<u32> = listing
-            .iter()
-            .filter(|f| f.get("X-GM-MSGID").is_some_and(|m| !have.contains(&m.text())))
-            .filter_map(fetched_uid)
-            .collect();
-        for chunk in need.chunks(8) {
-            let fetched = imap.uid_fetch(&uid_set(chunk), FULL_ITEMS)?;
-            let c = self.db.conn()?;
-            for f in &fetched {
-                insert_fetched(&c, account_id, f, false)?;
-                store_fetched_body(&c, account_id, f)?;
-            }
+        let thrids = [thrid.to_string()];
+        // No size limit here: the user is looking at this conversation.
+        let added = self.fill_threads(&mut imap, account_id, &thrids, i64::MAX)?;
+        imap.logout();
+        self.db.mark_hydrated(account_id, &thrids)?;
+        if added > 0 {
             self.emit("thread", thrid);
         }
-        imap.logout();
         Ok(())
     }
 
@@ -379,6 +466,6 @@ fn store_fetched_body(c: &rusqlite::Connection, account_id: i64, f: &Fetched) ->
     let (Some(msgid), Some(body)) = (f.get("X-GM-MSGID"), f.get("BODY")) else { return Ok(false) };
     let raw = body.bytes();
     let s = mime::summarize(raw);
-    Db::store_body(c, account_id, &msgid.text(), raw, &s.snippet, &s.text, s.has_attach)?;
+    Db::store_body(c, account_id, &msgid.text(), raw, &s.snippet, &s.text, &s.attachments)?;
     Ok(true)
 }

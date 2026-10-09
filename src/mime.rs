@@ -62,12 +62,13 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 pub struct Summary {
     pub snippet: String,
     pub text: String,
-    pub has_attach: bool,
+    /// JSON list of the attachments, as the UI wants it.
+    pub attachments: String,
 }
 
 pub fn summarize(raw: &[u8]) -> Summary {
     let Some(msg) = MessageParser::default().parse(raw) else {
-        return Summary { snippet: String::new(), text: String::new(), has_attach: false };
+        return Summary { snippet: String::new(), text: String::new(), attachments: "[]".into() };
     };
     let mut text = msg.body_text(0).map(|t| t.into_owned()).unwrap_or_default();
     // Plenty of HTML mail ships a throwaway plain-text part ("view this in a browser").
@@ -89,13 +90,17 @@ pub fn summarize(raw: &[u8]) -> Summary {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let text: String = text.chars().take(20_000).collect();
     let snippet: String = text.chars().take(220).collect();
-    // inline images carry a Content-ID and are not what people mean by "attachment"
-    let has_attach = msg.attachments().any(|a| a.content_id().is_none() || !mime_of(a).starts_with("image/"));
-    Summary { snippet, text, has_attach }
+    let attachments = serde_json::to_string(&list_attachments(&msg)).unwrap_or_else(|_| "[]".into());
+    Summary { snippet, text, attachments }
 }
 
-pub fn attachments(raw: &[u8]) -> Vec<Attachment> {
-    let Some(msg) = MessageParser::default().parse(raw) else { return Vec::new() };
+pub fn attachments_json(raw: &[u8]) -> String {
+    let list = MessageParser::default().parse(raw).map(|m| list_attachments(&m)).unwrap_or_default();
+    serde_json::to_string(&list).unwrap_or_else(|_| "[]".into())
+}
+
+/// Inline images carry a Content-ID and are not what people mean by "attachment".
+fn list_attachments(msg: &mail_parser::Message) -> Vec<Attachment> {
     msg.attachments()
         .enumerate()
         .filter(|(_, a)| a.content_id().is_none() || !mime_of(a).starts_with("image/"))
@@ -230,16 +235,16 @@ Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b1--\r\n";
 
     #[test]
     fn attachments_exclude_inline_images() {
-        let list = attachments(MSG);
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].name, "report.pdf");
-        assert_eq!(list[0].mime, "application/pdf");
-        let (name, _, bytes) = attachment(MSG, list[0].index).unwrap();
+        let list: serde_json::Value = serde_json::from_str(&attachments_json(MSG)).unwrap();
+        assert_eq!(list.as_array().unwrap().len(), 1);
+        assert_eq!(list[0]["name"], "report.pdf");
+        assert_eq!(list[0]["mime"], "application/pdf");
+        let (name, _, bytes) = attachment(MSG, list[0]["index"].as_u64().unwrap() as usize).unwrap();
         assert_eq!(name, "report.pdf");
         assert_eq!(bytes, b"%PDF-");
         assert!(inline_part(MSG, "logo@x").is_some());
         let s = summarize(MSG);
-        assert!(s.has_attach);
+        assert!(s.attachments.contains("report.pdf"));
         assert!(s.snippet.contains("Hi there"));
     }
 }
