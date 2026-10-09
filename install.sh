@@ -17,6 +17,9 @@ $SYS/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command '
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' >/dev/null 2>&1 || true
 sleep 1
 cp target/x86_64-pc-windows-gnullvm/release/unibox.exe "$DEST/unibox.exe"
+# Microsoft's loader for the WebView2 runtime; the .exe will not start without it alongside.
+LOADER=$(ls "$HOME"/.cargo/registry/src/*/webview2-com-sys-*/x64/WebView2Loader.dll | sort -V | tail -1)
+cp "$LOADER" "$DEST/WebView2Loader.dll"
 # the Edge profile from when the window was an Edge app window
 rm -rf "$LOCAL/Unibox/window"
 # An icon for the Start Menu shortcut (the window draws its own). Needs Pillow; skipped without it.
