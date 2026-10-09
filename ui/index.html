@@ -19,7 +19,8 @@
 <main>
   <header id="top">
     <input id="search" type="search" placeholder="Search the inbox  ( / )" autocomplete="off" spellcheck="false">
-    <button id="sync" aria-label="Sync"><span class="spin">↻</span></button>
+    <button id="sync" aria-label="Sync"><svg class="spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
     <button id="help" title="Keyboard shortcuts (?)">?</button>
   </header>
 
@@ -76,6 +77,19 @@
   </table>
   <form method="dialog" class="row"><button class="primary">Close</button></form>
 </dialog>
+
+<!-- An attachment shown in place: a picture, a PDF, or text. -->
+<div id="preview" hidden>
+  <header>
+    <span class="name"></span>
+    <span class="count"></span>
+    <button data-pv="prev" title="Previous attachment (←)">‹</button>
+    <button data-pv="next" title="Next attachment (→)">›</button>
+    <button data-pv="save" title="Save to Downloads">Save</button>
+    <button data-pv="close" title="Close (Esc)">✕</button>
+  </header>
+  <div class="stage"></div>
+</div>
 
 <div id="toast"></div>
 <script src="/app.js"></script>

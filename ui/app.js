@@ -412,9 +412,14 @@ function fill(node, m) {
   const f = el("iframe", "body");
   // Same-origin so its height can be measured, but scripts stay off: email code never runs.
   f.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
-  f.addEventListener("load", () => {
+  // Set the frame up as soon as its text is there. Waiting for "load" would leave a message
+  // squeezed into a short box for as long as one slow remote image took to arrive.
+  let ready = false;
+  const setup = () => {
     const doc = f.contentDocument;
-    if (!doc) return;
+    if (ready || !doc || !doc.body || doc.location.href === "about:blank" || doc.readyState === "loading") return;
+    ready = true;
+    clearInterval(poll);
     const root = doc.documentElement;
     // Mail laid out for a fixed width can be a little wider than the pane. Shrink it to fit
     // rather than cut it off; if it would need to shrink a lot, it scrolls sideways instead.
@@ -431,6 +436,11 @@ function fill(node, m) {
     fit();
     new ResizeObserver(fit).observe(root);
     root.classList.toggle("dk", dark.matches);
+    // An image that failed to load (usually a blocked tracker) leaves a broken-picture icon; drop it.
+    for (const img of doc.images) {
+      if (img.complete && !img.naturalWidth) img.style.display = "none";
+      else img.addEventListener("error", () => (img.style.display = "none"));
+    }
     doc.addEventListener("click", e => {
       const a = e.target.closest?.("a[href]");
       if (!a) return;
@@ -439,30 +449,97 @@ function fill(node, m) {
     });
     // Keyboard shortcuts keep working after clicking inside a message.
     doc.addEventListener("keydown", e => onKey(e));
-  });
+  };
+  const poll = setInterval(() => (f.isConnected ? setup() : clearInterval(poll)), 40);
+  f.addEventListener("load", setup);
   const view = node.dataset.view || "html";
   f.src = `/api/message/${m.id}/html?v=${BUILD}` + (view === "html" ? "" : "&view=" + view);
   content.append(f);
   if (m.attachments.length) {
     const files = el("div", "files");
-    for (const a of m.attachments) {
-      const link = el("a", "file");
-      link.href = `/api/message/${m.id}/attachment/${a.index}`;
-      link.download = a.name;
-      link.title = `${a.name} (${a.mime}): save to Downloads`;
-      // Saved straight into Downloads and shown there; a plain download is the fallback.
-      link.onclick = e => {
-        e.preventDefault();
-        api(link.href + "/save", { method: "POST" })
-          .then(r => toast("Saved to " + r.path))
-          .catch(() => { link.onclick = null; link.click(); });
-      };
-      link.append(el("span", "fn", "📎 " + a.name), el("span", "sz", fmtSize(a.size)));
-      files.append(link);
-    }
+    m.attachments.forEach((a, i) => {
+      // Click to look at it here; the arrow saves it.
+      const chip = el("div", "file");
+      chip.title = `${a.name} (${a.mime})`;
+      if (a.kind === "image") {
+        const thumb = el("img", "thumb");
+        thumb.loading = "lazy";
+        thumb.alt = "";
+        thumb.src = attachmentUrl(m, a) + "/preview";
+        chip.append(thumb);
+      }
+      const dl = el("button", "dl", "⭳");
+      dl.title = "Save to Downloads";
+      dl.onclick = e => { e.stopPropagation(); saveAttachment(m, a); };
+      chip.append(el("span", "fn", (a.kind === "image" ? "" : "📎 ") + a.name), el("span", "sz", fmtSize(a.size)), dl);
+      chip.onclick = () => openPreview(m, i);
+      files.append(chip);
+    });
     content.append(files);
   }
 }
+
+const attachmentUrl = (m, a) => `/api/message/${m.id}/attachment/${a.index}`;
+
+/** Saved straight into Downloads and shown there; a plain browser download is the fallback. */
+function saveAttachment(m, a) {
+  api(attachmentUrl(m, a) + "/save", { method: "POST" })
+    .then(r => toast("Saved to " + r.path))
+    .catch(() => {
+      const link = el("a");
+      link.href = attachmentUrl(m, a);
+      link.download = a.name;
+      link.click();
+    });
+}
+
+// ---- attachment preview -------------------------------------------------------
+const preview = { m: null, i: 0 };
+function openPreview(m, i) {
+  preview.m = m;
+  preview.i = i;
+  const a = m.attachments[i], box = $("#preview"), stage = box.querySelector(".stage");
+  box.hidden = false;
+  box.querySelector(".name").textContent = a.name;
+  box.querySelector(".count").textContent =
+    fmtSize(a.size) + (m.attachments.length > 1 ? ` · ${i + 1} of ${m.attachments.length}` : "");
+  box.querySelector('[data-pv="prev"]').disabled = i === 0;
+  box.querySelector('[data-pv="next"]').disabled = i === m.attachments.length - 1;
+  stage.textContent = "";
+  const url = attachmentUrl(m, a) + "/preview";
+  if (a.kind === "image") {
+    const img = el("img");
+    img.alt = a.name;
+    img.src = url;
+    stage.append(img);
+  } else if (a.kind === "pdf") {
+    const f = el("iframe");
+    f.src = url;
+    stage.append(f);
+  } else if (a.kind === "text") {
+    const pre = el("pre", "", "Loading…");
+    stage.append(pre);
+    fetch(url).then(r => r.text()).then(t => (pre.textContent = t)).catch(() => (pre.textContent = "Couldn't load this file."));
+  } else {
+    stage.append(el("div", "none", "No preview for this kind of file. Use Save to put it in Downloads."));
+  }
+}
+function closePreview() {
+  $("#preview").hidden = true;
+  $("#preview .stage").textContent = "";
+  preview.m = null;
+}
+function stepPreview(d) {
+  const n = preview.i + d;
+  if (preview.m && n >= 0 && n < preview.m.attachments.length) openPreview(preview.m, n);
+}
+$("#preview").addEventListener("click", e => {
+  const act = e.target.dataset?.pv;
+  if (act === "close" || e.target.classList.contains("stage")) closePreview();
+  if (act === "prev") stepPreview(-1);
+  if (act === "next") stepPreview(1);
+  if (act === "save") saveAttachment(preview.m, preview.m.attachments[preview.i]);
+});
 
 dark.addEventListener("change", () => {
   for (const f of document.querySelectorAll("iframe.body")) f.contentDocument?.documentElement.classList.toggle("dk", dark.matches);
@@ -611,6 +688,14 @@ function setListWidth(px, save) {
 let gPending = 0;
 function onKey(e) {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (preview.m) {
+    // while an attachment is up, the keyboard belongs to it
+    if (e.key === "Escape") closePreview();
+    else if (e.key === "ArrowLeft") stepPreview(-1);
+    else if (e.key === "ArrowRight") stepPreview(1);
+    else return;
+    return e.preventDefault();
+  }
   const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
   if (document.querySelector("dialog[open]")) return;
   if (typing) {

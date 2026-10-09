@@ -50,7 +50,7 @@ class Msg:
         self.uid_inbox = n + 1000
 
 
-def build(frm, to, subject, when, text=None, html=None, attach=None, inline=False):
+def build(frm, to, subject, when, text=None, html=None, attach=None, inline=False, extra=()):
     m = EmailMessage()
     m["From"], m["To"], m["Subject"] = frm, to, subject
     m["Date"] = format_datetime(datetime.fromtimestamp(when, timezone.utc))
@@ -61,6 +61,8 @@ def build(frm, to, subject, when, text=None, html=None, attach=None, inline=Fals
             m.get_payload()[1].add_related(PNG, "image", "png", cid="<chart1@fake>")
     if attach:
         m.add_attachment(attach[1], maintype="application", subtype="pdf", filename=attach[0])
+    for name, data, (main, sub) in extra:
+        m.add_attachment(data, maintype=main, subtype=sub, filename=name)
     return m.as_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
 
 
@@ -108,7 +110,10 @@ def mailbox(owner):
     add(3, 6, frm="=?utf-8?b?44Os44K044K544Kv44O844Or?= <lego@example.jp>", subject="来週のレッスンについて",
         text="来週土曜日のレッスンは14:05からです。", starred=True)
     add(4, 26, frm="Billing <billing@example.com>", subject="Your invoice for October", seen=True,
-        html="<p>Your invoice is attached.</p>", attach=("invoice-2026-10.pdf", b"%PDF-1.4 fake invoice"))
+        html="<p>Your invoice is attached.</p>", attach=("invoice-2026-10.pdf", b"%PDF-1.4 fake invoice"),
+        extra=[("receipt.png", png(320, 200, (60, 140, 220)), ("image", "png")),
+               ("items.csv", b"item,qty,price\nwidget,2,19.99\n<script>alert(1)</script>,1,0\n", ("text", "csv")),
+               ("archive.zip", b"PK\x03\x04 not really", ("application", "zip"))])
     for i in range(70):
         add(100 + i, 30 + i * 7, frm=f"Sender {i} <sender{i}@example.com>", subject=f"Routine message number {i}",
             text=f"This is the body of routine message {i}. " * 4, seen=i % 3 != 0)

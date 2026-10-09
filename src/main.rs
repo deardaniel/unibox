@@ -66,7 +66,7 @@ fn asset(name: &str, built_in: &'static str) -> String {
 }
 
 /// Bump when the way messages are rendered changes, so cached copies in the window are dropped.
-const RENDER_VERSION: &str = "7";
+const RENDER_VERSION: &str = "10";
 
 async fn index() -> impl IntoResponse {
     let html = asset("index.html", include_str!("../ui/index.html")).replace("__BUILD__", RENDER_VERSION);
@@ -226,6 +226,27 @@ async fn message_cid(State(app): State<Arc<App>>, Path((id, cid)): Path<(i64, St
         return Err(not_found());
     }
     Ok((untrusted(&mime), bytes).into_response())
+}
+
+/// An attachment shown in place. Only picture, PDF and text formats get this far (see
+/// `mime::preview_kind`), each served under a type that cannot run anything.
+async fn attachment_preview(State(app): State<Arc<App>>, Path((id, index)): Path<(i64, usize)>) -> Api<Response> {
+    let part = blocking(move || Ok(app.db.raw_body(id)?.and_then(|raw| mime::attachment_preview(&raw, index)))).await?;
+    let (mime, bytes) = part.ok_or_else(not_found)?;
+    if mime == "application/pdf" {
+        // The built-in PDF viewer refuses to load inside a sandbox, so this one response goes
+        // without it. A PDF cannot reach the page around it.
+        return Ok((
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("application/pdf")),
+                (header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+                (header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=2592000, immutable")),
+            ],
+            bytes,
+        )
+            .into_response());
+    }
+    Ok((untrusted(mime), bytes).into_response())
 }
 
 async fn message_attachment(State(app): State<Arc<App>>, Path((id, index)): Path<(i64, usize)>) -> Api<Response> {
@@ -397,6 +418,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
+        .route("/api/message/:id/attachment/:index/preview", get(attachment_preview))
         .route("/api/open", post(open_url))
         .route("/api/focus", post(focus_window))
         .route("/api/window", post(open_thread_window))

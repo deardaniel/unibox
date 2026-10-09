@@ -46,6 +46,38 @@ pub struct Attachment {
     pub name: String,
     pub mime: String,
     pub size: usize,
+    /// How the app can show it without saving: "image", "pdf", "text", or "" for no preview.
+    pub kind: &'static str,
+}
+
+/// What a file can safely be previewed as. The declared type is not trusted on its own: the
+/// bytes have to look right too, and only formats that cannot carry script are allowed
+/// (so no HTML and no SVG).
+fn preview_kind(name: &str, bytes: &[u8]) -> (&'static str, &'static str) {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let image = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() > 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    };
+    if let Some(mime) = image {
+        return ("image", mime);
+    }
+    if bytes.starts_with(b"%PDF-") {
+        return ("pdf", "application/pdf");
+    }
+    let texty = ["txt", "csv", "tsv", "log", "md", "json", "xml", "yml", "yaml", "ics", "vcf", "eml"];
+    if texty.contains(&ext.as_str()) && bytes.len() <= 2_000_000 && !bytes.contains(&0) {
+        // always labelled plain text, whatever it contains, so it is shown and never run
+        return ("text", "text/plain; charset=utf-8");
+    }
+    ("", "application/octet-stream")
 }
 
 fn mime_of(part: &mail_parser::MessagePart) -> String {
@@ -59,7 +91,7 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 }
 
 /// Bump when `summarize` changes, so stored messages are summarised again at startup.
-pub const SUMMARY_VERSION: &str = "3";
+pub const SUMMARY_VERSION: &str = "4";
 
 /// What we keep alongside the raw message for the list view and for search.
 pub struct Summary {
@@ -112,13 +144,21 @@ fn list_attachments(msg: &mail_parser::Message) -> Vec<Attachment> {
     msg.attachments()
         .enumerate()
         .filter(|(_, a)| a.content_id().is_none() || !mime_of(a).starts_with("image/"))
-        .map(|(index, a)| Attachment {
-            index,
-            name: a.attachment_name().unwrap_or("attachment").to_string(),
-            mime: mime_of(a),
-            size: a.contents().len(),
+        .map(|(index, a)| {
+            let name = a.attachment_name().unwrap_or("attachment").to_string();
+            let kind = preview_kind(&name, a.contents()).0;
+            Attachment { index, name, mime: mime_of(a), size: a.contents().len(), kind }
         })
         .collect()
+}
+
+/// (content type to serve, bytes) for an attachment that can be previewed.
+pub fn attachment_preview(raw: &[u8], index: usize) -> Option<(&'static str, Vec<u8>)> {
+    let (name, _, bytes) = attachment(raw, index)?;
+    match preview_kind(&name, &bytes) {
+        ("", _) => None,
+        (_, mime) => Some((mime, bytes)),
+    }
 }
 
 /// (file name, mime type, bytes) of the attachment at `index`.
@@ -177,14 +217,16 @@ fn sanitize(html: &str) -> String {
     b.clean(html).to_string()
 }
 
+/// The frame is as tall as its content, so the page inside must not size itself to the frame.
+/// Marketing mail routinely says `html, body { height: 100% !important }`; the `:root`
+/// selectors here outrank that wherever it appears.
 const FRAME_CSS: &str = "
-html,body{height:auto!important;min-height:0!important}
-html{overflow-x:auto!important;overflow-y:hidden!important}
-body{margin:0!important;padding:12px 14px!important;background:#fff;color:#111;
+html:root,html:root>body{height:auto!important;min-height:0!important;max-height:none!important}
+html:root{overflow-x:auto!important;overflow-y:hidden!important}
+body{margin:0!important;padding:12px 14px!important;box-sizing:border-box!important;background:#fff;color:#111;
      font:15px/1.5 'Segoe UI','Yu Gothic UI','Meiryo',-apple-system,BlinkMacSystemFont,sans-serif;
      -webkit-text-size-adjust:100%;overflow-wrap:anywhere}
-img{max-width:100%!important;height:auto!important}
-table{max-width:100%!important}
+img:not([width]):not([height]){max-width:100%;height:auto}
 pre{white-space:pre-wrap}
 blockquote{margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex}
 html.dk img:not([data-keep]){filter:invert(1) hue-rotate(180deg)}
@@ -320,6 +362,16 @@ Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
     }
 
     #[test]
+    fn frame_rules_outrank_a_messages_own_page_sizing() {
+        let msg = b"From: a@b.c\r\nSubject: s\r\nContent-Type: text/html\r\n\r\n\
+<style>html, body { height: 100% !important; }</style><p>hi</p>\r\n";
+        let html = render_html(msg, 1);
+        // the message's rule survives sanitising, so ours has to be the more specific one
+        assert!(html.contains("height: 100% !important"));
+        assert!(html.contains("html:root,html:root>body{height:auto!important"));
+    }
+
+    #[test]
     fn headers_decode() {
         let h = parse_headers(MSG);
         assert_eq!(h.from_name, "Matt Leviné");
@@ -366,6 +418,14 @@ Content-Type: multipart/alternative; boundary=b1\r\n\r\n\
         assert!(inline_part(MSG, "logo@x").is_some());
         let s = summarize(MSG);
         assert!(s.attachments.contains("report.pdf"));
+        // previews: decided by what the bytes are, never by the name alone
+        assert_eq!(list[0]["kind"], "pdf");
+        assert_eq!(attachment_preview(MSG, list[0]["index"].as_u64().unwrap() as usize).unwrap().0, "application/pdf");
+        assert_eq!(preview_kind("photo.png", b"<html><script>x</script>").0, "");
+        assert_eq!(preview_kind("page.html", b"<html>").0, "");
+        assert_eq!(preview_kind("drawing.svg", b"<svg onload=x>").0, "");
+        assert_eq!(preview_kind("notes.txt", b"<script>hi</script>"), ("text", "text/plain; charset=utf-8"));
+        assert_eq!(preview_kind("renamed.exe", b"\xff\xd8\xff\xe0").0, "image");
         assert!(s.snippet.contains("Hi there"));
     }
 }
