@@ -994,7 +994,7 @@ function focusMessage(i, scroll = true) {
   if (!node) return;
   if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); updateThreadBar(); }
   // put it at the top of the pane, with the end of the message before it still showing
-  const top = v.focus === 0 ? 0 : node.getBoundingClientRect().top - v.node.getBoundingClientRect().top + v.node.scrollTop - 40;
+  const top = v.focus === 0 ? 0 : node.getBoundingClientRect().top - v.node.getBoundingClientRect().top + v.node.scrollTop - 20;
   v.node.scrollTo({ top, behavior: scroll ? "smooth" : "auto" });
 }
 
