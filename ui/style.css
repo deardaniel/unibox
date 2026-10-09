@@ -154,7 +154,7 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .view h1 { font-size: 21px; font-weight: 600; margin: 16px 18px 12px; max-width: 900px; }
 .view .messages { max-width: 900px; padding: 0 14px 60px; }
 .msg { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
-.msg > header { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px 10px; cursor: pointer; }
+.msg > header { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; cursor: pointer; }
 .msg .who { flex: 1; min-width: 0; line-height: 1.35; }
 .msg .top { display: flex; align-items: baseline; gap: 12px; }
 .msg .from { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
