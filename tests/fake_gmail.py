@@ -187,6 +187,10 @@ def mailbox(owner):
         <div itemprop="potentialAction" itemscope itemtype="http://schema.org/ViewAction">
         <link itemprop="target" href="https://air.example/trips/K7QF2M"/><meta itemprop="name" content="View trip"/></div></div>
         <p>Thanks for booking with Example Air. Your confirmation code is <b>K7QF2M</b>.</p>""")
+    # A conversation whose subject is long enough to wrap in the reading pane.
+    long = "Notification of completion of application and of the registration of a contact address for the ticket office lottery, with the details of what happens next and when"
+    for i, h in enumerate((30, 29, 28)):
+        add(11, h, frm="Tickets <noreply@tickets.example>", subject=long, seen=True, text=f"Message {i + 1} of three.\n" + "A line of text.\n" * 30)
     # A receipt laid out as a table: the price column must not be squeezed to one character.
     add(10, 9, frm="Castle Hire <receipts@pay.example>", subject="Your receipt [#1267-1958]", seen=True, html="""
         <table width="600" align="center"><tr><td style="padding:24px;background:#f6f9fc">

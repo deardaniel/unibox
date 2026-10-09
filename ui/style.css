@@ -228,7 +228,7 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 /* Once a waiting conversation has been laid out, freeze it: otherwise every one of them
    is laid out again on each step of a window resize. */
 .view.parked:not(.on) { content-visibility: hidden; }
-.view h1 { font-size: 21px; font-weight: 600; margin: 16px 14px 12px; max-width: 900px; }
+.view h1 { font-size: 21px; line-height: 28px; font-weight: 600; margin: 16px 14px 12px; max-width: 900px; }
 .view .messages { max-width: 900px; padding: 0 14px 60px; }
 .msg { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
 .msg > header { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; cursor: pointer; }

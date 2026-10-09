@@ -436,7 +436,11 @@ async function loadView(v, peek) {
   if (state.views.get(v.key) !== v) return;
   const first = !v.messages.length;
   const before = new Map(v.messages.map(m => [m.id, m]));
+  const held = v.messages[v.focus]?.id;
   v.messages = data.messages;
+  // older messages turning up are added above: stay on the same message, not the same position
+  const again = v.messages.findIndex(m => m.id === held);
+  if (again >= 0) v.focus = again;
   // a conversation opens at its first unread message, or at the latest one when all are read
   if (first) { const unread = v.messages.findIndex(m => !m.seen); v.focus = unread >= 0 ? unread : Math.max(0, v.messages.length - 1); }
   const box = v.node.querySelector(".messages");
@@ -1000,7 +1004,10 @@ function focusMessage(i, scroll = true) {
   if (!node) return;
   if (node.classList.contains("closed")) { node.classList.remove("closed"); fill(node, v.messages[v.focus]); updateThreadBar(); }
   // put it exactly where the first message of a conversation sits: below the room the subject takes
-  const top = node.getBoundingClientRect().top - nodes[0].getBoundingClientRect().top;
+  // (a subject long enough to wrap pushes the first message down; go by a one-line subject)
+  const h1 = v.node.querySelector("h1");
+  const wrapped = Math.max(0, h1.offsetHeight - parseFloat(getComputedStyle(h1).lineHeight));
+  const top = v.focus === 0 ? 0 : node.getBoundingClientRect().top - nodes[0].getBoundingClientRect().top + wrapped;
   // A short message at the end leaves too little below it to scroll that far, so room is added
   // under the conversation: as much as this needs, and never less than the current scroll
   // position is already using (taking that away would make the pane jump).
