@@ -31,7 +31,6 @@ pub struct AgentState {
     cancel: AtomicBool,
     /// What it is doing right now, for the panel ("Looking through your mail…").
     status: Mutex<String>,
-    error: Mutex<Option<String>>,
     pub collection: Mutex<Option<Collection>>,
 }
 
@@ -274,7 +273,9 @@ impl App {
         let mut messages = Vec::new();
         for (role, content) in self.db.agent_history()? {
             let blocks = content.as_array().cloned().unwrap_or_default();
-            if role == "user" {
+            if role == "error" {
+                messages.push(json!({ "role": "error", "text": blocks.first().and_then(|b| b["text"].as_str()) }));
+            } else if role == "user" {
                 // the person's own words are the last text block; tool results are not shown
                 let text = blocks.iter().rev().find(|b| b["type"] == "text").and_then(|b| b["text"].as_str());
                 if blocks.iter().any(|b| b["type"] == "tool_result") {
@@ -297,7 +298,6 @@ impl App {
             "model": model,
             "busy": self.agent.busy.load(Ordering::Relaxed),
             "status": *self.agent.status.lock().unwrap(),
-            "error": *self.agent.error.lock().unwrap(),
             "collection": collection,
             "messages": messages,
         }))
@@ -308,7 +308,6 @@ impl App {
             bail!("The assistant is still working.");
         }
         self.db.agent_clear()?;
-        *self.agent.error.lock().unwrap() = None;
         self.emit("agent", "");
         Ok(())
     }
@@ -336,11 +335,10 @@ impl App {
             bail!("The assistant is still working on the last thing you asked.");
         }
         self.agent.cancel.store(false, Ordering::Relaxed);
-        *self.agent.error.lock().unwrap() = None;
         let prepared = (|| -> Result<()> {
             // If the app was closed half-way through a turn, the log ends with tool calls that
             // never got an answer. The API rejects that, so answer them now.
-            if let Some((role, content)) = self.db.agent_history()?.last() {
+            if let Some((role, content)) = self.agent_exchange()?.last() {
                 let unanswered: Vec<Value> = content
                     .as_array()
                     .into_iter()
@@ -369,14 +367,21 @@ impl App {
         let app = self.clone();
         std::thread::spawn(move || {
             if let Err(e) = app.agent_loop() {
+                // kept in the conversation, so what went wrong can still be read later
                 app.log(&format!("assistant: {e:#}"));
-                *app.agent.error.lock().unwrap() = Some(format!("{e:#}"));
+                let _ = app.db.agent_append("error", &json!([{ "type": "text", "text": format!("{e:#}") }]));
             }
             app.agent.status.lock().unwrap().clear();
             app.agent.busy.store(false, Ordering::SeqCst);
             app.emit("agent", "");
         });
         Ok(())
+    }
+
+    /// The conversation as the model sees it. Errors are kept in the log for the person to
+    /// read; they were never part of the exchange.
+    fn agent_exchange(&self) -> Result<Vec<(String, Value)>> {
+        Ok(self.db.agent_history()?.into_iter().filter(|(role, _)| role != "error").collect())
     }
 
     fn agent_status(&self, status: &str) {
@@ -431,7 +436,7 @@ impl App {
         let (base_url, model, _) = self.agent_config();
         let key = secrets::get(&self.dir, KEY_NAME).map_err(|_| anyhow!("The assistant has no API key yet."))?;
         let messages: Vec<Value> =
-            self.db.agent_history()?.into_iter().map(|(role, content)| json!({ "role": role, "content": content })).collect();
+            self.agent_exchange()?.into_iter().map(|(role, content)| json!({ "role": role, "content": content })).collect();
         let first_party = base_url.starts_with("https://api.anthropic.com");
         let mut body = json!({
             "model": model,

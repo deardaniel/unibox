@@ -1212,6 +1212,7 @@ function renderAssistant() {
   }
   for (const m of d.messages) {
     if (m.role === "user") { log.append(el("div", "as-msg user", m.text)); continue; }
+    if (m.role === "error") { log.append(el("div", "as-error", m.text)); continue; }
     const node = el("div", "as-msg");
     if (m.did.length) {
       const did = el("div", "as-did");
@@ -1222,7 +1223,6 @@ function renderAssistant() {
     if (node.childNodes.length) log.append(node);
   }
   if (d.busy) log.append(el("div", "as-status", d.status || "Working…"));
-  if (d.error) log.append(el("div", "as-error", d.error));
   $("#as-send").textContent = d.busy ? "Stop" : "Send";
   if (atEnd || d.busy) log.scrollTop = log.scrollHeight;
 }
