@@ -774,7 +774,9 @@ mod window {
 /// Where to put a window that was last at `saved` (x, y, width, height in screen pixels),
 /// given the screens there are now (same form). The size is capped to the screen it lands
 /// on and the window is nudged fully onto it; `None` if it was on a screen that is gone,
-/// in which case the system should place it afresh.
+/// in which case the system should place it afresh. A few pixels over the edge are left
+/// alone: Windows counts an invisible resize border as part of the window, so one sitting
+/// flush against the left edge reports x = -7.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn place_window(saved: (i32, i32, i32, i32), screens: &[(i32, i32, i32, i32)]) -> Option<(i32, i32, i32, i32)> {
     let (x, y, w, h) = saved;
@@ -785,10 +787,14 @@ fn place_window(saved: (i32, i32, i32, i32), screens: &[(i32, i32, i32, i32)]) -
     };
     // the screen holding most of the window
     let screen = screens.iter().max_by_key(|s| overlap(s)).filter(|s| overlap(s) > 0)?;
-    let (w, h) = (w.min(screen.2), h.min(screen.3));
-    let x = x.clamp(screen.0, screen.0 + screen.2 - w);
-    let y = y.clamp(screen.1, screen.1 + screen.3 - h);
-    Some((x, y, w, h))
+    const SLACK: i32 = 16;
+    let cap = |len: i32, room: i32| if len <= room + 2 * SLACK { len } else { room };
+    let (w, h) = (cap(w, screen.2), cap(h, screen.3));
+    let fit = |at: i32, len: i32, from: i32, room: i32| {
+        let (lo, hi) = (from.min(from + room - len), from.max(from + room - len));
+        if (lo - SLACK..=hi + SLACK).contains(&at) { at } else { at.clamp(lo, hi) }
+    };
+    Some((fit(x, w, screen.0, screen.2), fit(y, h, screen.1, screen.3), w, h))
 }
 
 #[cfg(test)]
@@ -811,6 +817,10 @@ mod tests {
         assert_eq!(place_window((-200, -50, 1300, 900), &one), Some((0, 0, 1300, 900)));
         // bigger than the screen now is
         assert_eq!(place_window((0, 0, 3000, 2000), &one), Some((0, 0, 1920, 1080)));
+        // flush against the left edge, as Windows reports it, is left alone
+        assert_eq!(place_window((-7, 0, 1364, 1039), &one), Some((-7, 0, 1364, 1039)));
+        // filling the screen with the invisible border hanging over each side
+        assert_eq!(place_window((-7, 0, 1934, 1047), &one), Some((-7, 0, 1934, 1047)));
         // straddling two screens goes to the one holding more of it
         assert_eq!(place_window((1800, 100, 1000, 800), &two), Some((1920, 100, 1000, 800)));
     }
