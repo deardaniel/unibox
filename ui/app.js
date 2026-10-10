@@ -905,6 +905,7 @@ function showColour() {
   const hex = pickedColour();
   if (hsvToHex(picker.h, picker.s, picker.v) !== hex) Object.assign(picker, hexToHsv(hex));   // changed from elsewhere
   for (const b of $("#swatches").children) b.classList.toggle("on", b.dataset.c === hex);
+  $("#colour-reset").hidden = hex === PURPLE;   // nothing to go back to
   $("#colour-field").style.setProperty("--h", picker.h);
   $("#colour-knob").style.left = picker.s * 100 + "%";
   $("#colour-knob").style.top = (1 - picker.v) * 100 + "%";

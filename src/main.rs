@@ -729,7 +729,7 @@ mod window {
     use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
     use tao::event::{Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
-    use tao::platform::windows::WindowExtWindows;
+    use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
     use tao::window::{Icon, Theme, Window, WindowBuilder, WindowId};
     use wry::{NewWindowResponse, WebContext, WebView, WebViewBuilder};
 
@@ -774,7 +774,13 @@ mod window {
     /// The app icon, drawn here so the binary needs no image files: an envelope on a tile of
     /// the app's colour.
     fn icon(tile: [u8; 3]) -> Option<Icon> {
-        const N: i32 = 64;
+        Icon::from_rgba(icon_pixels(tile, 64), 64, 64).ok()
+    }
+
+    /// The app's icon `n` pixels square, as RGBA: a rounded tile in the given colour with a
+    /// white envelope on it.
+    fn icon_pixels(tile: [u8; 3], n: u32) -> Vec<u8> {
+        let k = n as f32 / 64.0; // drawn on a 64-unit grid
         let dist = |px: f32, py: f32, a: (f32, f32), b: (f32, f32)| {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
             let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
@@ -785,10 +791,10 @@ mod window {
             ((l, t), (r, t)), ((r, t), (r, b)), ((r, b), (l, b)), ((l, b), (l, t)),
             ((l, t), (32.0, 35.0)), ((32.0, 35.0), (r, t)),
         ];
-        let mut rgba = Vec::with_capacity((N * N * 4) as usize);
-        for y in 0..N {
-            for x in 0..N {
-                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        let mut rgba = Vec::with_capacity((n * n * 4) as usize);
+        for y in 0..n {
+            for x in 0..n {
+                let (px, py) = ((x as f32 + 0.5) / k, (y as f32 + 0.5) / k);
                 // rounded square: distance from the nearest corner centre
                 let (cx, cy) = (px.clamp(13.0, 51.0), py.clamp(13.0, 51.0));
                 let inside = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt() <= 13.0;
@@ -800,7 +806,61 @@ mod window {
                 });
             }
         }
-        Icon::from_rgba(rgba, N as u32, N as u32).ok()
+        rgba
+    }
+
+    /// The same icon as a .ico file in the usual sizes.
+    fn ico_file(tile: [u8; 3]) -> Vec<u8> {
+        let sizes = [16u32, 24, 32, 48, 64, 256];
+        let images: Vec<Vec<u8>> = sizes
+            .iter()
+            .map(|&n| {
+                let rgba = icon_pixels(tile, n);
+                let mut bmp = Vec::new();
+                bmp.extend_from_slice(&40u32.to_le_bytes());
+                bmp.extend_from_slice(&(n as i32).to_le_bytes());
+                bmp.extend_from_slice(&(2 * n as i32).to_le_bytes()); // picture and mask, one above the other
+                bmp.extend_from_slice(&[1, 0, 32, 0]);
+                bmp.extend_from_slice(&[0; 24]);
+                for row in rgba.chunks((n * 4) as usize).rev() {
+                    for p in row.chunks(4) {
+                        bmp.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+                    }
+                }
+                // the old one-bit mask: unused next to an alpha channel, but it has to be there
+                bmp.resize(bmp.len() + (n.div_ceil(32) * 4 * n) as usize, 0);
+                bmp
+            })
+            .collect();
+        let mut out = vec![0, 0, 1, 0, sizes.len() as u8, 0];
+        let mut at = 6 + 16 * sizes.len();
+        for (n, image) in sizes.iter().zip(&images) {
+            let side = if *n == 256 { 0 } else { *n as u8 };
+            out.extend_from_slice(&[side, side, 0, 0, 1, 0, 32, 0]);
+            out.extend_from_slice(&(image.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(at as u32).to_le_bytes());
+            at += image.len();
+        }
+        images.iter().for_each(|i| out.extend_from_slice(i));
+        out
+    }
+
+    /// Give the Start Menu shortcut (and so a pinned taskbar button) the chosen colour too:
+    /// it shows the .ico file the installer put beside the app.
+    fn recolour_shortcut(tile: [u8; 3]) {
+        let Some(file) = std::env::current_exe().ok().and_then(|p| Some(p.parent()?.join("unibox.ico"))) else { return };
+        let wanted = ico_file(tile);
+        if !file.exists() || std::fs::read(&file).is_ok_and(|now| now == wanted) {
+            return;
+        }
+        if std::fs::write(&file, wanted).is_ok() {
+            #[link(name = "shell32")]
+            extern "system" {
+                fn SHChangeNotify(event: i32, flags: u32, item1: *const std::ffi::c_void, item2: *const std::ffi::c_void);
+            }
+            // tell Explorer its remembered icons are out of date (SHCNE_ASSOCCHANGED)
+            unsafe { SHChangeNotify(0x0800_0000, 0, std::ptr::null(), std::ptr::null()) };
+        }
     }
 
     /// What the page sent after "badge:": nothing to clear it, or "<side>:<hex RGBA pixels>".
@@ -833,6 +893,7 @@ mod window {
             .with_inner_size(LogicalSize::new(size.0, size.1))
             .with_min_inner_size(LogicalSize::new(560.0, 400.0))
             .with_window_icon(icon(PURPLE))
+            .with_taskbar_icon(icon(PURPLE))
             .with_visible(visible)
             .build(target)?;
         let id = window.id();
@@ -984,6 +1045,11 @@ mod window {
                 Event::UserEvent(UserEvent::Accent(id, colour)) => {
                     if let Some((_, w)) = windows.get(&id) {
                         w.set_window_icon(icon(colour));
+                        // the taskbar button shows the window's large icon, which is set separately
+                        w.set_taskbar_icon(icon(colour));
+                        if id == main_id {
+                            recolour_shortcut(colour);
+                        }
                     }
                 }
                 Event::UserEvent(UserEvent::Badge(id, badge)) if id == main_id => {

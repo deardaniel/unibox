@@ -476,7 +476,7 @@ const MESSAGES = {
     "Color as #rrggbb": "色 (#rrggbb)",
     "Button": "ボタン",
     "Filter on": "フィルター有効",
-    "Back to purple": "紫に戻す",
+    "Back to default": "既定に戻す",
     "Done": "完了",
     "Purple (the original)": "紫 (初期設定)",
 
