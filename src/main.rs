@@ -168,7 +168,7 @@ struct ThreadQuery {
 /// The list goes out as one array per conversation rather than an object, in the order of
 /// `THREAD_COLUMNS` in the UI: with All Mail it can be a hundred thousand rows, and the
 /// field names would be most of it. `senders` is left empty when it is just the sender.
-async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>) -> Api<Json<Vec<serde_json::Value>>> {
+async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>) -> Api<Json<Vec<ThreadCells>>> {
     let rows = blocking(move || {
         if q.collection {
             let keys = app.agent.collection.lock().unwrap().as_ref().map(|c| c.keys.clone()).unwrap_or_default();
@@ -182,14 +182,17 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
         rows.into_iter()
             .map(|t| {
                 let alone = &t.senders == if t.from_name.is_empty() { &t.from_addr } else { &t.from_name };
-                serde_json::json!([
-                    t.account_id, t.thrid, t.date, t.subject, t.snippet, if alone { "" } else { &t.senders }, t.count,
-                    t.unread, t.starred as u8, t.has_attach as u8, t.from_name, t.from_addr, t.in_inbox as u8, t.people as u8
-                ])
+                (
+                    t.account_id, t.thrid, t.date, t.subject, t.snippet, if alone { String::new() } else { t.senders }, t.count,
+                    t.unread, t.starred as u8, t.has_attach as u8, t.from_name, t.from_addr, t.in_inbox as u8, t.people as u8,
+                )
             })
             .collect(),
     ))
 }
+
+/// One conversation of the list, as the array it is sent as.
+type ThreadCells = (i64, String, i64, String, String, String, i64, i64, u8, u8, String, String, u8, u8);
 
 // ---- the assistant ---------------------------------------------------------
 async fn agent_view(State(app): State<Arc<App>>) -> Api<Json<serde_json::Value>> {
