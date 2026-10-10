@@ -28,7 +28,7 @@ const state = {
   collection: null,      // { title }: the list is showing a set the assistant picked
   unreadOnly: false,     // list only conversations with something unread
   kept: new Set(),       // thread keys opened while unreadOnly is on; they stay listed once read
-  peopleOnly: false,     // leave out conversations that only systems sent (newsletters, receipts, notices)
+  kind: "",              // "people" or "automated" to list only mail a person wrote, or only what systems sent
   all: false,            // list All Mail (archived and sent mail too), not only the inbox
 };
 const key = t => t.account_id + ":" + t.thrid;
@@ -294,19 +294,20 @@ function listParams() {
   const p = new URLSearchParams({ q: state.q });
   if (state.filter != null) p.set("account", state.filter);
   if (state.unreadOnly) { p.set("unread", true); p.set("keep", [...state.kept].join(",")); }
-  if (state.peopleOnly) p.set("people", true);
+  if (state.kind) p.set("kind", state.kind);
   if (state.all) p.set("all", true);
   return p;
 }
 
-/** The list's switches: All Mail instead of the inbox, only unread (conversations opened
- *  while it is on stay listed), and only mail that people wrote. */
-const LIST_FILTERS = { all: "#all-mail", unreadOnly: "#unread-only", peopleOnly: "#people-only" };
+/** What the list is narrowed to, in the bar above it: where (the inbox, or All Mail), only
+ *  unread (conversations opened while it is on stay listed), and who wrote it. */
+const KINDS = ["", "people", "automated"];
+const KIND_FROM = { people: "from people", automated: "from automated senders" };
 function showListFilters() {
-  for (const [name, button] of Object.entries(LIST_FILTERS)) {
-    $(button).classList.toggle("on", state[name]);
-    $(button).setAttribute("aria-pressed", state[name]);
-  }
+  $("#unread-only").classList.toggle("on", state.unreadOnly);
+  $("#unread-only").setAttribute("aria-pressed", state.unreadOnly);
+  for (const b of $("#scope").children) b.classList.toggle("on", !!b.dataset.all === state.all);
+  for (const b of $("#kind").children) b.classList.toggle("on", b.dataset.kind === state.kind);
   $("#search").placeholder = state.all ? "Search all mail  ( / )" : "Search the inbox  ( / )";
 }
 function setListFilter(name, on) {
@@ -327,10 +328,24 @@ function leaveCollection() {
   api("/api/agent/collection/clear", { method: "POST" }).catch(() => {});
 }
 
+// The list arrives as one array per conversation, in this order (see list_threads in main.rs).
+const THREAD_COLUMNS = ["account_id", "thrid", "date", "subject", "snippet", "senders", "count", "unread", "starred",
+  "has_attach", "from_name", "from_addr", "in_inbox", "people"];
+const THREAD_FLAGS = new Set(["starred", "has_attach", "in_inbox", "people"]);
+async function fetchThreads(params) {
+  const rows = await api("/api/threads?" + params);
+  return rows.map(r => {
+    const t = {};
+    THREAD_COLUMNS.forEach((name, i) => { t[name] = THREAD_FLAGS.has(name) ? !!r[i] : r[i]; });
+    if (!t.senders) t.senders = t.from_name || t.from_addr;
+    return t;
+  });
+}
+
 /** Fetch the list: all of it, every time. Only the rows in view are ever drawn (see renderRows). */
 async function loadThreads() {
   const asked = listParams().toString();
-  const rows = await api("/api/threads?" + asked);
+  const rows = await fetchThreads(asked);
   if (asked !== listParams().toString()) return;   // the list has changed since; a newer answer is coming
   state.threads = applyOverrides(rows);
   renderList();
@@ -346,7 +361,7 @@ function renderListFoot() {
     : (state.q ? `Search in ${state.filter == null ? (state.all ? "all mail" : "all inboxes") : account(state.filter)?.email}`
       : state.filter == null ? (state.all ? "All Mail" : "All inboxes") : account(state.filter)?.email || "Inbox")
       + (state.all && state.filter != null ? ", all mail" : "")
-      + (state.peopleOnly ? ", people only" : "") + (state.unreadOnly ? ", unread only" : "");
+      + (state.kind ? `, ${state.kind} only` : "") + (state.unreadOnly ? ", unread only" : "");
   // All Mail is listed in the background, newest first; say so while older mail is still coming
   const loading = state.all && !state.collection && state.accounts.some(a => a.indexing && (state.filter == null || a.id === state.filter));
   foot.textContent = "";
@@ -379,8 +394,8 @@ function renderList() {
   if (!state.threads.length) {
     list.append(el("div", "empty",
       !state.accounts.length ? "Add a Gmail account to get started."
-        : state.unreadOnly ? (state.q ? "Nothing unread matches that search." : state.peopleOnly ? "Nothing unread from people." : "Nothing unread.")
-        : state.peopleOnly ? (state.q ? "Nothing from people matches that search." : "Nothing from people in the inbox.")
+        : state.unreadOnly ? (state.q ? "Nothing unread matches that search." : state.kind ? `Nothing unread ${KIND_FROM[state.kind]}.` : "Nothing unread.")
+        : state.kind ? (state.q ? `Nothing ${KIND_FROM[state.kind]} matches that search.` : `Nothing ${KIND_FROM[state.kind]} ${state.all ? "here" : "in the inbox"}.`)
         : state.q ? "Nothing in the inbox matches that search."
         : state.accounts.some(a => !a.last_sync) ? "Fetching your inbox…" : "Inbox zero."));
     renderListFoot();
@@ -1429,7 +1444,7 @@ let gPending = 0, starPending = 0;
 function goInbox() {
   $("#search").value = "";
   state.q = "";
-  state.unreadOnly = state.peopleOnly = state.all = false;
+  state.unreadOnly = state.all = false; state.kind = "";
   state.kept = new Set();
   showListFilters();
   setFilter(null);   // also leaves any set the assistant was showing
@@ -1516,7 +1531,7 @@ function onKey(e) {
     }
     case "r": replyInGmail(); break;
     case "f": setListFilter("unreadOnly", !state.unreadOnly); break;
-    case "F": setListFilter("peopleOnly", !state.peopleOnly); break;
+    case "F": setListFilter("kind", KINDS[(KINDS.indexOf(state.kind) + 1) % KINDS.length]); break;
     case "/": $("#search").focus(); $("#search").select(); break;
     case "?": $("#help-dialog").showModal(); break;
     case "g": gPending = Date.now(); break;
@@ -1566,9 +1581,9 @@ function renderSync() {
 function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
 $("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
-$("#all-mail").onclick = e => { e.currentTarget.blur(); setListFilter("all", !state.all); };
+$("#scope").onclick = e => { const b = e.target.closest("button"); if (!b) return; b.blur(); if (!!b.dataset.all !== state.all) setListFilter("all", !!b.dataset.all); };
+$("#kind").onclick = e => { const b = e.target.closest("button"); if (!b) return; b.blur(); if (b.dataset.kind !== state.kind) setListFilter("kind", b.dataset.kind); };
 $("#unread-only").onclick = e => { e.currentTarget.blur(); setListFilter("unreadOnly", !state.unreadOnly); };
-$("#people-only").onclick = e => { e.currentTarget.blur(); setListFilter("peopleOnly", !state.peopleOnly); };
 $("#help").onclick = () => $("#help-dialog").showModal();
 // The same dialog adds an account or, given one, replaces its saved app password.
 function openAccountDialog(acct) {
@@ -1761,7 +1776,7 @@ $("#as-setup").addEventListener("submit", async e => {
 /** The assistant picked a set of conversations: put it in the list. */
 function showCollection(title) {
   state.collection = { title };
-  state.unreadOnly = state.peopleOnly = state.all = false;
+  state.unreadOnly = state.all = false; state.kind = "";
   showListFilters();
   state.q = "";
   $("#search").value = "";
@@ -1796,7 +1811,7 @@ async function refresh() {
   state.accounts = await api("/api/accounts");
   renderAccounts();
   const asked = listParams().toString();
-  let rows = await api("/api/threads?" + asked);
+  let rows = await fetchThreads(asked);
   if (asked !== listParams().toString()) return;
   const at = state.open?.key || (state.threads[state.cursor] && key(state.threads[state.cursor]));
   rows = applyOverrides(rows);
@@ -1812,7 +1827,8 @@ async function refresh() {
 }
 
 let refreshTimer, indexedTimer = 0;
-function refreshSoon() { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => refresh().catch(() => {}), 250); }
+// (All Mail is a long list to fetch again: there, changes are gathered up for longer)
+function refreshSoon() { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => refresh().catch(() => {}), state.all ? 1500 : 250); }
 
 function listen() {
   const es = new EventSource("/api/events");
@@ -1850,6 +1866,7 @@ function listen() {
     return;
   }
   setListWidth(+store.get("list-width") || LIST_DEFAULT, false);
+  showListFilters();
   await refresh();
   listen();
   api("/api/sync").then(setSync).catch(() => {});

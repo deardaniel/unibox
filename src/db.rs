@@ -352,7 +352,7 @@ impl Db {
         account: Option<i64>,
         query: &str,
         unread_only: bool,
-        people_only: bool,
+        kind: &str,
         keep: &str,
         all_mail: bool,
     ) -> Result<Vec<ThreadRow>> {
@@ -394,10 +394,12 @@ impl Db {
               GROUP BY account_id, gm_thrid
              HAVING (?3=0 OR SUM(seen=0)>0
                      OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?4)))
-                AND (?5=0 OR SUM(COALESCE(automated, 0)=0)>0)
+                AND CASE ?5 WHEN 'people' THEN SUM(automated=0)>0
+                            WHEN 'automated' THEN SUM(automated=1)>0 AND COALESCE(SUM(automated=0), 0)=0
+                            ELSE 1 END
               ORDER BY newest DESC"
         ))?;
-        let rows = st.query_map(params![account, wanted, unread_only, keep, people_only, all_mail], |r| {
+        let rows = st.query_map(params![account, wanted, unread_only, keep, kind, all_mail], |r| {
             Ok(ThreadRow {
                 account_id: r.get(0)?,
                 thrid: r.get(1)?,
@@ -790,7 +792,7 @@ mod tests {
         };
         add("1", "1", "Your receipt for the bouncy castle", true);
         add("2", "2", "Minutes of the meeting", false);
-        let found = |q: &str, all: bool| db.threads(None, q, false, false, "[]", all).unwrap().len();
+        let found = |q: &str, all: bool| db.threads(None, q, false, "", "[]", all).unwrap().len();
         // before the index is built, and after: the same answers
         for built in [false, true] {
             if built {

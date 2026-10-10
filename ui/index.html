@@ -20,9 +20,16 @@
 <main>
   <header id="top">
     <input id="search" type="search" placeholder="Search the inbox  ( / )" autocomplete="off" spellcheck="false">
-    <button id="all-mail" aria-pressed="false" title="Show All Mail: archived and sent mail too, not only the inbox (g then a; g then i goes back)">All Mail</button>
+    <div id="scope" class="seg" role="group" aria-label="Which mail to list">
+      <button data-all="" title="Only what is in the inbox (g then i)">Inbox</button>
+      <button data-all="1" title="Everything: archived and sent mail too (g then a)">All Mail</button>
+    </div>
     <button id="unread-only" aria-pressed="false" title="Show only unread conversations (f)">Unread</button>
-    <button id="people-only" aria-pressed="false" title="Show only mail that people wrote: no newsletters, receipts or notifications (Shift+F)">People</button>
+    <div id="kind" class="seg" role="group" aria-label="Who wrote it">
+      <button data-kind="" title="Mail from anyone">Everyone</button>
+      <button data-kind="people" title="Only mail that a person wrote (Shift+F steps through these)">People</button>
+      <button data-kind="automated" title="Only mail that systems sent: newsletters, receipts, notifications. Handy for finding lists to leave (Shift+F)">Automated</button>
+    </div>
     <button id="sync" aria-label="Sync"><svg class="spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
     <button id="ask" title="Assistant (Ctrl+K)" aria-label="Assistant"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"
@@ -118,7 +125,7 @@
     <tr><td><kbd>r</kbd></td><td>Reply (opens the conversation in Gmail)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search</td></tr>
     <tr><td><kbd>f</kbd></td><td>Show only unread conversations (again to show all)</td></tr>
-    <tr><td><kbd>Shift</kbd>+<kbd>f</kbd></td><td>Show only mail that people wrote (again to show all)</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>f</kbd></td><td>Step through mail from everyone / people only / automated only</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Open the assistant</td></tr>
     <tr><td><kbd>g</kbd> then <kbd>a</kbd></td><td>All Mail: archived and sent mail too</td></tr>
     <tr><td><kbd>g</kbd> then <kbd>i</kbd></td><td>Back to all inboxes, clearing any search</td></tr>

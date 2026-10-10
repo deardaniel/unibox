@@ -14,7 +14,8 @@ triage: replying opens the conversation in Gmail.
   unread beneath it.
 - All Mail (`g` `a`) lists everything, archived and sent mail too; `g` `i` goes back to the
   inbox. A conversation there can be moved back to the inbox.
-- Filters for unread only (`f`) and for mail a person wrote rather than a machine (`F`).
+- Narrow the list to unread only (`f`), and to mail a person wrote or mail systems sent
+  (`F` steps through everyone / people / automated).
 - Archive, read/unread and star are written back to Gmail. `z` undoes.
 - Gmail's keyboard shortcuts: `j`/`k`, `o`, `u`, `e`, `s`, `x`, `/` and the rest. Press `?`
   in the app for the list.

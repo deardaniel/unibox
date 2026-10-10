@@ -141,9 +141,17 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 /* ---- assistant ---- */
 #ask { display: grid; place-items: center; width: 34px; padding: 0; color: var(--accent); }
 #ask.on { background: var(--hover); }
-#all-mail, #unread-only, #people-only { padding: 0 12px; }
-#all-mail.on, #unread-only.on, #people-only.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-body.solo #all-mail, body.solo #unread-only, body.solo #people-only { display: none; }
+#unread-only { padding: 0 12px; }
+#unread-only.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* a choice of one among a few: buttons joined into a single control */
+.seg { display: flex; flex: none; }
+.seg button { padding: 0 11px; border-radius: 0; margin-left: -1px; white-space: nowrap; }
+.seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 8px 8px 0; }
+/* the usual choice (the first) is marked quietly; anything else stands out, as a filter that is on */
+.seg button.on { background: var(--hover); font-weight: 600; }
+.seg button.on:not(:first-child) { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
+body.solo #unread-only, body.solo .seg { display: none; }
 #assistant { flex: none; width: 380px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
 #assistant[hidden] { display: none; }
 #assistant > header { display: flex; align-items: center; gap: 2px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--line); height: 51px; }
