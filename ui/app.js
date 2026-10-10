@@ -884,12 +884,34 @@ function setColour(hex) {
   applyColour(hex);
   showColour();
 }
+
+// The picker works in hue, vividness and brightness (HSV), which is what the square and the
+// strip are; the colour itself is kept as #rrggbb.
+const hsvToHex = (h, s, v) => {
+  const f = n => { const k = (n + h / 60) % 6; return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1)))); };
+  return "#" + [f(5), f(3), f(1)].map(x => x.toString(16).padStart(2, "0")).join("");
+};
+const hexToHsv = hex => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+  const h = !d ? 0 : max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return { h: h * 60, s: max ? d / max : 0, v: max };
+};
+// where the knobs are; kept apart from the colour so the hue stays put while dragging through greys and black
+const picker = { h: 256, s: 0.8, v: 0.9 };
 function showColour() {
   const hex = pickedColour();
+  if (hsvToHex(picker.h, picker.s, picker.v) !== hex) Object.assign(picker, hexToHsv(hex));   // changed from elsewhere
   for (const b of $("#swatches").children) b.classList.toggle("on", b.dataset.c === hex);
-  $("#colour-any").value = hex;
+  $("#colour-field").style.setProperty("--h", picker.h);
+  $("#colour-knob").style.left = picker.s * 100 + "%";
+  $("#colour-knob").style.top = (1 - picker.v) * 100 + "%";
+  $("#colour-knob").style.background = hex;
+  $("#colour-hue").value = Math.round(picker.h);
+  $("#colour-now").style.background = hex;
   if (document.activeElement !== $("#colour-hex")) $("#colour-hex").value = hex;
 }
+const pick = change => { Object.assign(picker, change); setColour(hsvToHex(picker.h, picker.s, picker.v)); };
 applyColour(pickedColour());
 addEventListener("storage", e => { if (e.key === "accent") { applyColour(pickedColour()); showColour(); } });
 for (const c of COLOURS) {
@@ -900,7 +922,22 @@ for (const c of COLOURS) {
   b.onclick = () => setColour(c);
   $("#swatches").append(b);
 }
-$("#colour-any").oninput = e => setColour(e.target.value.toLowerCase());
+{
+  const field = $("#colour-field");
+  const at = e => {
+    const r = field.getBoundingClientRect(), unit = x => Math.max(0, Math.min(1, x));
+    pick({ s: unit((e.clientX - r.left) / r.width), v: 1 - unit((e.clientY - r.top) / r.height) });
+  };
+  field.onpointerdown = e => { field.setPointerCapture(e.pointerId); at(e); };
+  field.onpointermove = e => { if (field.hasPointerCapture(e.pointerId)) at(e); };
+  field.onkeydown = e => {
+    const step = { ArrowLeft: [-0.02, 0], ArrowRight: [0.02, 0], ArrowUp: [0, 0.02], ArrowDown: [0, -0.02] }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    pick({ s: Math.max(0, Math.min(1, picker.s + step[0])), v: Math.max(0, Math.min(1, picker.v + step[1])) });
+  };
+  $("#colour-hue").oninput = e => pick({ h: +e.target.value % 360 });
+}
 $("#colour-hex").oninput = e => { const v = e.target.value.trim().toLowerCase(); if (/^#?[0-9a-f]{6}$/.test(v)) setColour(v.startsWith("#") ? v : "#" + v); };
 $("#colour-reset").onclick = () => setColour(PURPLE);
 $("#colour-done").onclick = () => $("#colour-dialog").close();

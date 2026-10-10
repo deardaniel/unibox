@@ -333,12 +333,23 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
                white-space: nowrap; pointer-events: none; }
 #link-status.lie { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; }
 #trust-dialog { width: min(560px, 92vw); }
-#colour-dialog { width: min(420px, 92vw); }
+#colour-dialog { width: min(440px, 92vw); }
 #swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 #swatches button { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid var(--panel); outline: 1px solid var(--line); }
 #swatches button.on { outline: 2px solid var(--ink); }
-#colour-any-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; color: var(--muted); font-size: 13px; }
-#colour-any { display: block; width: 44px; height: 30px; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+#colour-field { position: relative; height: 170px; margin-bottom: 12px; border-radius: 8px; border: 1px solid var(--line); cursor: crosshair;
+  touch-action: none; outline: none;
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(var(--h, 256) 100% 50%)); }
+#colour-field:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+#colour-knob { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.55), inset 0 0 0 1px rgba(0,0,0,.25); pointer-events: none; }
+#colour-hue { display: block; width: 100%; height: 14px; margin: 0 0 14px; padding: 0; border: 1px solid var(--line); border-radius: 8px;
+  -webkit-appearance: none; appearance: none; cursor: pointer;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+#colour-hue::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 20px; border-radius: 5px; background: #fff;
+  border: 1px solid rgba(0,0,0,.45); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+#colour-any-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+#colour-now { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--line); flex: none; }
 #colour-hex { display: block; width: 96px; margin: 0; font: 13px "Cascadia Mono", Consolas, ui-monospace, monospace; }
 #colour-sample { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 #colour-sample > * { height: 30px; pointer-events: none; }

@@ -113,7 +113,10 @@
   <h2>Colour</h2>
   <p>The colour used across Unibox. Its brightness is adjusted where needed so it stays readable in light and dark.</p>
   <div id="swatches"></div>
-  <div id="colour-any-row"><input type="color" id="colour-any" aria-label="Any colour"><span>or any colour:</span><input id="colour-hex" spellcheck="false" autocomplete="off" maxlength="7" aria-label="Colour as #rrggbb"></div>
+  <!-- any colour at all: across for how vivid, up for how bright, the strip below for the hue -->
+  <div id="colour-field" tabindex="0" role="slider" aria-label="How vivid and how bright"><span id="colour-knob"></span></div>
+  <input type="range" id="colour-hue" min="0" max="360" step="1" aria-label="Hue">
+  <div id="colour-any-row"><span id="colour-now"></span><input id="colour-hex" spellcheck="false" autocomplete="off" maxlength="7" aria-label="Colour as #rrggbb"></div>
   <div id="colour-sample"><button class="primary" tabindex="-1">Button</button><button class="toggle" aria-pressed="true" tabindex="-1">Filter on</button><span class="token">is:unread</span></div>
   <div class="row"><button id="colour-reset">Back to purple</button><button id="colour-done" class="primary">Done</button></div>
 </dialog>
