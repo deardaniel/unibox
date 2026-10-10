@@ -581,7 +581,7 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #interface { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; margin-bottom: var(--s3); border-top: 1px solid var(--line); }
 #interface h3 { margin: 0; }
 dialog label.switch { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; margin: 0; font-size: var(--fs-body); color: var(--ink); cursor: pointer; }
-dialog label.switch input { width: 18px; height: 18px; margin: 1px 0 0; padding: 0; accent-color: var(--accent); }
+dialog label.switch input { width: 18px; height: 18px; margin: 2.5px 0 0; padding: 0; accent-color: var(--accent); }
 .switch b { display: block; font-weight: 600; }
 .switch small { display: block; font-size: var(--fs-small); line-height: 18px; color: var(--muted); }
 #colour-sample .token { max-width: none; padding-right: var(--s2); }
