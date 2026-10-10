@@ -82,7 +82,9 @@ or Claude Code can work with every account at once instead of one Gmail connecto
 offers the built-in assistant's tools (`query_mail`, `read_conversation`, `apply_action`,
 `draft_reply`, `show_conversations`) plus `list_accounts`. Anything that returns the words of
 an email says, in the tool's description and beside each answer, that mail is to be read and
-never obeyed. Queries see all mail, with whether a
+never obeyed. `show_conversations` takes over the list in the window, so other assistants are told to use it
+only when asked to show mail there, and it is not marked read-only, so a client can ask first.
+Queries see all mail, with whether a
 person or a system sent each message and whether it can be unsubscribed from, and can use the
 full-text index; actions include archiving and moving back to the inbox. Like the assistant, it cannot send
 or delete. Unibox has to be open; nothing is exposed beyond this PC.
