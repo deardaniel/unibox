@@ -28,6 +28,14 @@ Use a token for every colour, font size, radius, shadow and duration, in `ui/sty
 `ui/app.js` alike. A raw colour belongs only in `:root`; account colours, which come from the
 database (`--c`), are the one exception.
 
+`ui/style.css` is the source of truth for values; this document names the tokens and their
+roles. Where it lists a family without values (avatars, swatches), the values live only in the
+style sheet.
+
+A custom property that only one component uses may stay local to that component's rule (the
+rail's `--lead` and `--open` on `#side`); it becomes a design token once a second component
+needs it.
+
 Spacing on the 4 px grid uses `--s1`–`--s6`. Component dimensions (column widths, icon sizes,
 a deliberate off-grid padding) may stay literal: snapping them would move things for no gain.
 
@@ -162,6 +170,12 @@ removable with ×), then what is typed. Typed filters (`is:unread`, `in:all`, `f
 the matching token or scope. Focus: accent border plus a 1 px accent ring. Suggestions float
 (`--r-lg`, `--shadow-float`) with the key hints on their last line.
 
+**The rail.** Laid out once at its open width and clipped when closed, so opening it moves
+nothing: each row has a leading slot exactly as wide as the closed rail (the logo, an account's
+unread pill or dot, a tool's icon), and opening only reveals the labels beside it. The unread
+count stays in its coloured pill in that slot, open or closed. It opens after a 120 ms delay and
+widens over 120 ms; nothing else in it animates.
+
 **Conversation rows.** Fixed height, set on the row itself (`height: var(--row-h)`), never
 taken from its content, so 140,000 rows scroll without layout work and line up at every display
 scale. Unread is
@@ -177,7 +191,8 @@ hex in script.
 **Menus, suggestions, toasts.** The only floating things besides dialogs: `--r-lg`, hairline,
 `--shadow-float`. They appear and go instantly; no fade. Menu items are 32 px; a check shows the
 current choice. A toast confirms and offers undo (`z`); it never asks a question, and it goes
-after 4 s or on the next key.
+after 4 s or on the next key. A toast raised while a dialog is open shows inside that dialog,
+and `z` works there too (except while typing in a field).
 
 **Status.** A 9 px dot: `--ok` working, `--warn` needs a look, `--danger` failing, a hollow
 `--muted` ring for idle, a pulsing `--accent` dot for busy. The dot sits on the first line of
@@ -202,7 +217,8 @@ action shows the focus ring.
 deleting downloaded copies. Those may use the system's own question box; it is native and
 expected. Everything that can be undone (archive, archive all from a sender, mark, star, move)
 happens at once and offers Undo (`z`) in a toast. Never ask "are you sure?" about an undoable
-action.
+action. Where an action could be made undoable cheaply, prefer that to asking: starting a new
+assistant chat keeps the previous one until the toast's Undo has had its chance.
 
 ## Speed
 

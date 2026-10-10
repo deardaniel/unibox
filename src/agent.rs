@@ -31,6 +31,8 @@ pub struct AgentState {
     cancel: AtomicBool,
     /// What it is doing right now, for the panel ("Looking through your mail…").
     status: Mutex<String>,
+    /// The conversation a new chat replaced, kept while the window still offers to bring it back.
+    stash: Mutex<Option<Vec<(String, Value)>>>,
     pub collection: Mutex<Option<Collection>>,
 }
 
@@ -319,9 +321,29 @@ impl App {
         if self.agent.busy.load(Ordering::Relaxed) {
             bail!("The assistant is still working.");
         }
+        *self.agent.stash.lock().unwrap() = Some(self.db.agent_history()?);
         self.db.agent_clear()?;
         self.emit("agent", "");
         Ok(())
+    }
+
+    /// Bring back the conversation the last new chat replaced, in place of the new one.
+    pub fn agent_restore(&self) -> Result<()> {
+        if self.agent.busy.load(Ordering::Relaxed) {
+            bail!("The assistant is still working.");
+        }
+        let Some(kept) = self.agent.stash.lock().unwrap().take() else { bail!("There is no earlier chat to bring back.") };
+        self.db.agent_clear()?;
+        for (role, content) in &kept {
+            self.db.agent_append(role, content)?;
+        }
+        self.emit("agent", "");
+        Ok(())
+    }
+
+    /// Let go of the conversation kept by the last new chat.
+    pub fn agent_forget(&self) {
+        *self.agent.stash.lock().unwrap() = None;
     }
 
     pub fn agent_stop(&self) {

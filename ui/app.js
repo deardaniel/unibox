@@ -69,26 +69,53 @@ async function api(path, opts = {}) {
   return r.status === 204 || r.status === 202 ? null : r.json();
 }
 
-/** Say that something happened. It never asks anything; `undo` adds a button that takes the
- *  last action back (the same as z). It goes after four seconds or on the next key. */
-function toast(text, { undo: offerUndo = false } = {}) {
+/** Say that something happened. It never asks anything. `undo` adds a button that takes it
+ *  back: `true` for the last thing done to mail (what z undoes anyway), or a function of its own.
+ *  `gone` is called if it leaves without being undone. It goes after four seconds or on the
+ *  next key, and z presses its button. */
+function toast(text, { undo: offer = false, gone = null } = {}) {
+  dismissToast();
   const t = $("#toast");
   // an open dialog covers the rest of the page and takes its clicks: say it inside the dialog
   const host = [...document.querySelectorAll("dialog[open]")].pop() || document.body;
   if (t.parentNode !== host) host.append(t);
   t.textContent = text;
-  if (offerUndo) {
+  toast.undo = offer === true ? () => undo() : offer || null;
+  toast.gone = gone;
+  if (toast.undo) {
     const b = el("button", "", tx("Undo"));
     b.dataset.key = "z";
-    b.onclick = () => undo();
+    b.onclick = takeToastUndo;
     t.append(b);
   }
   t.classList.add("show");
-  clearTimeout(toast.h);
-  toast.h = setTimeout(() => t.classList.remove("show"), 4000);
+  toast.h = setTimeout(dismissToast, 4000);
 }
-// before the key does whatever it does, which may be to raise a toast of its own
-addEventListener("keydown", () => $("#toast").classList.remove("show"), true);
+function dismissToast() {
+  clearTimeout(toast.h);
+  $("#toast").classList.remove("show");
+  const gone = toast.gone;
+  toast.undo = toast.gone = null;
+  gone?.();
+}
+function takeToastUndo() {
+  const back = toast.undo;
+  toast.gone = null;   // it is not going: it is being taken back
+  dismissToast();
+  back?.();
+}
+// Before the key does whatever it does, which may be to raise a toast of its own. While an
+// Undo is on offer, z takes it, even with a dialog open, unless something is being typed.
+addEventListener("keydown", e => {
+  if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;   // not a key press of its own
+  const typing = e.target.closest?.("input, textarea, select, [contenteditable]");
+  if (toast.undo && e.key === "z" && !e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return takeToastUndo();
+  }
+  dismissToast();
+}, true);
 
 // Links leave the app: they go to the default browser, where you are signed in.
 function openExternal(url) {
@@ -1029,7 +1056,7 @@ async function openSubscriptions() {
       b.title = tx("Archive the {n} in the inbox from this sender", { n: n(r.in_inbox) });
       b.onclick = async e => {
         e.stopPropagation();
-        if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // said no, or nothing was there
+        if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // nothing was there
         b.remove();
         inbox.textContent = "";
       };
@@ -2328,8 +2355,14 @@ $("#assistant").addEventListener("click", async e => {
   if (act === "settings") { assistant.setup = !assistant.setup; renderAssistant(); }
   if (act === "cancel-setup") { assistant.setup = false; renderAssistant(); }
   if (act === "new") {
-    if (assistant.data?.messages.length && !confirm(tx("Start a new conversation? The assistant will forget this one."))) return;
-    api("/api/agent/reset", { method: "POST" }).catch(err => toast(err.message));
+    // at once, with the previous chat kept until the offer to bring it back has gone
+    const had = assistant.data?.messages.length;
+    api("/api/agent/reset", { method: "POST" }).then(() => {
+      if (had) toast(tx("New chat started."), {
+        undo: () => api("/api/agent/restore", { method: "POST" }).catch(err => toast(txServer(err.message))),
+        gone: () => api("/api/agent/forget", { method: "POST" }).catch(() => {}),
+      });
+    }).catch(err => toast(txServer(err.message)));
   }
 });
 $("#as-setup").addEventListener("submit", async e => {

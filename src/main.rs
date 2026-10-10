@@ -234,6 +234,16 @@ async fn agent_reset(State(app): State<Arc<App>>) -> Api<StatusCode> {
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn agent_restore(State(app): State<Arc<App>>) -> Api<StatusCode> {
+    app.agent_restore().map_err(bad_request)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn agent_forget(State(app): State<Arc<App>>) -> StatusCode {
+    app.agent_forget();
+    StatusCode::NO_CONTENT
+}
+
 async fn agent_stop(State(app): State<Arc<App>>) -> StatusCode {
     app.agent_stop();
     StatusCode::NO_CONTENT
@@ -690,6 +700,8 @@ fn router(app: Arc<App>) -> Router {
         .route("/mcp", post(mcp_message))
         .route("/api/agent", get(agent_view).post(agent_send))
         .route("/api/agent/reset", post(agent_reset))
+        .route("/api/agent/restore", post(agent_restore))
+        .route("/api/agent/forget", post(agent_forget))
         .route("/api/agent/stop", post(agent_stop))
         .route("/api/agent/config", post(agent_configure))
         .route("/api/agent/collection/clear", post(agent_clear_collection))
