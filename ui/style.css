@@ -1,22 +1,71 @@
+/* The tokens: the block below is the one in DESIGN.md. Change both together. */
 :root {
-  --bg: #f6f5f2; --panel: #fff; --ink: #1c1c1c; --muted: #6b6b6b; --line: #e4e2dd;
-  --hover: #f0eee9; --unread-bg: #fff; --read-bg: #f3f2ee;
-  /* The one colour everything else is shaded from. The person picks it (click the U); the app
-     keeps its hue and vividness and only reins in its brightness, so that it reads on white
-     here and on black in the dark theme below. */
+  /* neutrals */
+  --bg: #f4f4f3;        /* the window */
+  --panel: #fff;        /* surfaces: fields, messages, dialogs, unread rows */
+  --raised: #fafaf9;    /* filled fields inside a panel */
+  --hover: #ececea;
+  --line: #e1e0dc;      /* hairlines */
+  --ink: #1b1b1b;
+  --muted: #616161;     /* secondary text; 4.5:1 or better on every ground */
+  --unread-bg: var(--panel);
+  --read-bg: #f8f8f7;
+
+  /* the picked colour: the only input; everything else is derived */
   --pick: #5b2ee8;
-  --accent: oklch(from var(--pick) clamp(0.38, l, 0.58) c h); --cursor: var(--accent);
-  --danger: #c0392b; --ok: #2e7d4f; --warn: #a86400; --rail: 50px;
-  --tint: color-mix(in srgb, var(--accent) 11%, var(--panel));   /* behind something switched on */
-  color-scheme: light dark;
+  --accent: oklch(from var(--pick) clamp(0.38, l, 0.58) c h);
+  --tint: color-mix(in srgb, var(--accent) 11%, var(--panel));         /* behind what is on */
+  --accent-line: color-mix(in srgb, var(--accent) 40%, var(--panel));  /* borders, keys on an on-control */
+  --on-accent: #fff;
+  --cursor: var(--accent);
+
+  /* status: dots and text only, never fills behind content */
+  --ok: #2e7d4f; --warn: #a86400; --danger: #c0392b;
+
+  /* type */
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --fs-caption: 12px; --fs-small: 13px; --fs-body: 14px; --fs-subtitle: 16px; --fs-title: 20px; --fs-mono: 12.5px;
+
+  /* space (4 px grid), shape, size */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --r-sm: 4px;   /* tokens, kbd, small chips */
+  --r: 6px;      /* buttons, fields, rows, toggles */
+  --r-lg: 8px;   /* menus, suggestions, messages, panels */
+  --r-xl: 10px;  /* dialogs */
+  --control-h: 32px;
+  --rail: 50px;
+
+  /* depth and motion */
+  --shadow-float: 0 8px 24px rgba(0,0,0,.12);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,.2);
+  --focus: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+  --t-menu: 80ms; --t-rail: 120ms;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #131313; --panel: #000; --ink: #ececec; --muted: #9a9a9a; --line: #2a2a2a;
-    --hover: #1f1f1f; --unread-bg: #1a1a1a; --read-bg: #101010;
+    --bg: #1f1f1f; --panel: #2a2a2a; --raised: #262626; --hover: #353535; --line: #3a3a3a;
+    --ink: #ededed; --muted: #a8a8a8; --read-bg: #242424;
     --accent: oklch(from var(--pick) clamp(0.70, calc(l + 0.26), 0.80) calc(c * 0.68) h);
-    --danger: #ff7b6b; --ok: #5fbf8a; --warn: #e0a84a;
+    --tint: color-mix(in srgb, var(--accent) 16%, var(--panel));  /* 11% is too faint on grey panels */
+    --on-accent: #111;
+    --ok: #5fbf8a; --warn: #e0a84a; --danger: #ff7b6b;
+    --shadow-float: 0 8px 24px rgba(0,0,0,.5);
+    --shadow-modal: 0 24px 64px rgba(0,0,0,.6);
   }
+}
+/* Not in DESIGN.md yet: what the code needs besides. */
+:root {
+  color-scheme: light dark;
+  --paper: #fff;        /* the ground an email is drawn on, and text on a strong colour, in both themes */
+  --star: #e2a400;
+  --scrim: rgba(0,0,0,.45);                     /* behind a dialog */
+  --stage: rgba(0,0,0,.93); --stage-muted: #bbb; /* behind an attachment shown in place */
+  --black: #000;
+  --spectrum: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);   /* the colour picker's hue strip */
+  --t-spin: 1s; --t-pulse: 1.6s;                /* spinners and busy dots: they show work, they are not transitions */
+}
+@media (prefers-color-scheme: dark) {
   /* Emails are light-only HTML: flip the frame, and its images get flipped back from inside. */
   iframe.body { filter: invert(1) hue-rotate(180deg); }
 }
