@@ -635,15 +635,17 @@ dialog label.switch input { width: 18px; height: 18px; margin: 0; padding: 0; ac
 /* The status rows, grouped by subsystem: on the left, in a fixed column, an icon tile with the
    subsystem's name and how it is reached; on the right, its rows. Hairlines between groups. */
 #doctor-rows { margin-bottom: var(--s4); }
-.dg { display: grid; grid-template-columns: 170px minmax(0, 1fr); column-gap: var(--s3); padding: 10px 0; border-top: 1px solid var(--line); }
+/* a group's heading and its first row share a baseline */
+.dg { display: grid; grid-template-columns: 170px minmax(0, 1fr); column-gap: var(--s3); align-items: first baseline; padding: 10px 0; border-top: 1px solid var(--line); }
 .dg:first-child { border-top: 0; padding-top: 0; }
 .dg-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.dg-head .what { align-self: baseline; min-width: 0; }   /* the heading's baseline is the column's, not the tile's */
 /* the tile is taller than its heading's line, and centred on it */
 .dg-head .tile { flex: none; --box: 28px; width: var(--box); height: var(--box); margin-block: calc((var(--lh-subtitle) - var(--box)) / 2);
                  border-radius: var(--r); background: var(--hover); color: var(--muted); display: grid; place-items: center; }
 .dg-head .name { font-weight: 600; font-size: var(--fs-subtitle); line-height: var(--lh-subtitle); }
 .dg-head .tag { font: var(--fs-key)/1.3 var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 var(--s1); }
-.dg-rows { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; padding-top: 3px; }
+.dg-rows { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
 /* a row: its dot, what it is, what there is to say, and on the right a figure worth lining up */
 .dr { display: grid; grid-template-columns: 9px minmax(90px, 170px) minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; }
 .dr .count { color: var(--muted); font-size: var(--fs-small); line-height: var(--lh-small); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
