@@ -101,7 +101,13 @@ Use this to find, count and inspect mail. There is one table to query, `mail`, w
 - from_name, from_addr, to_addrs, cc_addrs, subject TEXT.\n\
 - snippet TEXT: the first couple of hundred characters of the body. body_text TEXT: the body as plain text, up to about 20,000 characters. \
 Both are empty for archived mail that has not been opened in the app yet: only its headers are held, so find that by subject, sender or date.\n\
-- in_inbox INTEGER: 1 if it is in the inbox now, 0 if archived. unread, starred, has_attachments INTEGER 0/1. size INTEGER bytes.\n\
+- in_inbox INTEGER: 1 if it is in the inbox now, 0 if archived. All of All Mail is listed, archived and sent mail too, so add in_inbox=1 when the person means their inbox. \
+unread, starred, has_attachments INTEGER 0/1. size INTEGER bytes.\n\
+- automated INTEGER: 1 if a system sent it (newsletter, receipt, notification), 0 if a person wrote it, NULL if not known. \
+can_unsubscribe INTEGER: 1 if the message says how to unsubscribe (a mailing list). downloaded INTEGER: 1 if the body is held, so body_text and snippet are filled in.\n\
+To find words in subjects, senders and bodies quickly, use the full-text index: message_id IN (SELECT rowid FROM search WHERE search MATCH '\"refund\" \"amazon\"'). \
+Each quoted term must be at least 3 characters and matches as a word or part of one; several terms must all appear in the same message. \
+For shorter terms use LIKE. \
 LIKE is case-insensitive for ASCII letters. At most 200 rows come back and long text is shortened, so select only the columns you need, \
 use COUNT and GROUP BY to get an overview first (for example sender domains: substr(from_addr, instr(from_addr,'@')+1)), and add LIMIT. \
 Always include message_id when you intend to show or act on the results.",
@@ -144,12 +150,13 @@ Use it before answering a question about a specific conversation or drafting a r
             "description": "Change conversations in the person's mailbox. This is sent to Gmail. Only call it for a change the person asked for. \
 The action applies to the whole conversation each message belongs to. Give either message_ids, or sql: a SELECT over `mail` whose first column is message_id. \
 `archive` removes the conversation from the inbox (it stays in All Mail); conversations that are not in the inbox are left alone by it. \
+`move_to_inbox` is the reverse: it puts an archived conversation back in the inbox. \
 Marking read or unread and starring work on archived conversations too. \
 The result says how many conversations were changed.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["archive", "mark_read", "mark_unread", "star", "unstar"] },
+                    "action": { "type": "string", "enum": ["archive", "move_to_inbox", "mark_read", "mark_unread", "star", "unstar"] },
                     "message_ids": { "type": "array", "items": { "type": "integer" } },
                     "sql": { "type": "string", "description": "SELECT message_id FROM mail WHERE ..." }
                 },
@@ -549,6 +556,7 @@ impl App {
             "apply_action" => {
                 let op = match input["action"].as_str().unwrap_or_default() {
                     "archive" => "archive",
+                    "move_to_inbox" => "inbox",
                     "mark_read" => "read",
                     "mark_unread" => "unread",
                     "star" => "star",
@@ -663,6 +671,7 @@ fn activity(block: &Value) -> String {
         "read_conversation" => "Reading a conversation".into(),
         "apply_action" => match input["action"].as_str().unwrap_or_default() {
             "archive" => "Archiving".into(),
+            "move_to_inbox" => "Moving to the inbox".into(),
             "mark_read" => "Marking as read".into(),
             "mark_unread" => "Marking as unread".into(),
             "star" => "Starring".into(),

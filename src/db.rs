@@ -702,7 +702,9 @@ impl Db {
                SELECT m.id AS message_id, a.email AS account, m.account_id, m.gm_thrid AS thread_id,
                       m.date, datetime(m.date, 'unixepoch', 'localtime') AS date_local,
                       m.from_name, m.from_addr, m.to_addrs, m.cc_addrs, m.subject, m.snippet, m.body_text,
-                      m.in_inbox, (m.seen = 0) AS unread, m.starred, m.has_attach AS has_attachments, m.size
+                      m.in_inbox, (m.seen = 0) AS unread, m.starred, m.has_attach AS has_attachments, m.size,
+                      m.automated, m.has_body AS downloaded,
+                      COALESCE(m.facts LIKE '%\"unsubscribe\":{%', 0) AS can_unsubscribe
                  FROM main.messages m JOIN main.accounts a ON a.id = m.account_id;",
         )?;
         let mut st = c.prepare(sql)?;
@@ -843,6 +845,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open(&dir.join("q.db")).unwrap();
         assert!(db.agent_query("SELECT message_id, has_attachments FROM mail", 5, 40).is_ok());
+        // what the list's filters go by, and the search index, are there to be asked about
+        assert!(db.agent_query("SELECT automated, downloaded, can_unsubscribe FROM mail WHERE in_inbox=0", 5, 40).is_ok());
+        assert!(db.agent_query("SELECT message_id FROM mail WHERE message_id IN (SELECT rowid FROM search WHERE search MATCH '\"refund\"')", 5, 40).is_ok());
         assert!(db.agent_query("ATTACH DATABASE 'x.db' AS x", 5, 40).is_err());
         assert!(db.agent_query("SELECT 1; PRAGMA writable_schema=1", 5, 40).is_err());
         let _ = std::fs::remove_dir_all(&dir);

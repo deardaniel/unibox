@@ -2118,6 +2118,7 @@ function assistantActed({ op, items }) {
     }),
   };
   const said = { archive: ["Assistant archived {n} conversation.", "Assistant archived {n} conversations."],
+    inbox: ["Assistant moved {n} conversation to the inbox.", "Assistant moved {n} conversations to the inbox."],
     read: ["Assistant marked {n} conversation read.", "Assistant marked {n} conversations read."],
     unread: ["Assistant marked {n} conversation unread.", "Assistant marked {n} conversations unread."],
     star: ["Assistant starred {n} conversation.", "Assistant starred {n} conversations."],

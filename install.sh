@@ -17,6 +17,11 @@ $SYS/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command '
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' >/dev/null 2>&1 || true
 sleep 1
 cp target/x86_64-pc-windows-gnullvm/release/unibox.exe "$DEST/unibox.exe"
+# A second copy for other assistants to start with --mcp (see README). It only passes messages
+# to the app, so it rarely needs replacing, and under its own name it is neither stopped above
+# nor in the way of the next install while one of them has it running.
+cp target/x86_64-pc-windows-gnullvm/release/unibox.exe "$DEST/unibox-mcp.exe" 2>/dev/null ||
+  echo "unibox-mcp.exe is in use (an assistant has it open); kept the copy that is there."
 # Microsoft's loader for the WebView2 runtime; the .exe will not start without it alongside.
 LOADER=$(ls "$HOME"/.cargo/registry/src/*/webview2-com-sys-*/x64/WebView2Loader.dll | sort -V | tail -1)
 cp "$LOADER" "$DEST/WebView2Loader.dll"

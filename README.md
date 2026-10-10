@@ -72,7 +72,9 @@ changed there too. Mail it reads to answer a question is sent to that endpoint.
 Unibox is also an [MCP](https://modelcontextprotocol.io) server, so Claude Desktop, Cowork
 or Claude Code can work with every account at once instead of one Gmail connector each. It
 offers the built-in assistant's tools (`query_mail`, `read_conversation`, `apply_action`,
-`draft_reply`, `show_conversations`) plus `list_accounts`. Like the assistant, it cannot send
+`draft_reply`, `show_conversations`) plus `list_accounts`. Queries see all mail, with whether a
+person or a system sent each message and whether it can be unsubscribed from, and can use the
+full-text index; actions include archiving and moving back to the inbox. Like the assistant, it cannot send
 or delete. Unibox has to be open; nothing is exposed beyond this PC.
 
 For Claude Desktop and Cowork, add this to `claude_desktop_config.json` (Settings → Developer
@@ -82,14 +84,16 @@ For Claude Desktop and Cowork, add this to `claude_desktop_config.json` (Setting
 {
   "mcpServers": {
     "unibox": {
-      "command": "C:\\Users\\YOU\\AppData\\Local\\Programs\\Unibox\\unibox.exe",
+      "command": "C:\\Users\\YOU\\AppData\\Local\\Programs\\Unibox\\unibox-mcp.exe",
       "args": ["--mcp"]
     }
   }
 }
 ```
 
-`unibox.exe --mcp` speaks MCP on stdin/stdout and passes each message to the open app. A
+`unibox-mcp.exe` is a copy of the app that `install.sh` puts beside it for this: with `--mcp`
+it speaks MCP on stdin/stdout and passes each message to the open app. (It is a separate file
+so that updating Unibox does not have to stop the assistant's connection.) A
 client that can reach `http://127.0.0.1:47821/mcp` itself (Claude Code on Windows:
 `claude mcp add --transport http unibox http://127.0.0.1:47821/mcp`) needs no helper. That
 address refuses web pages: requests carrying a browser's `Origin` are turned away.
