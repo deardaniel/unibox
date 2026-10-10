@@ -93,7 +93,7 @@
     <h2 id="add-title">Add a Gmail account</h2>
     <p>Unibox signs in with an <a href="https://myaccount.google.com/apppasswords" data-external>app password</a>,
        not your normal password. It is kept in the Windows Credential Manager on this PC.</p>
-    <label>Email address <input name="email" type="email" required autocomplete="off" placeholder="you@gmail.com"></label>
+    <label>Email address <input name="email" type="email" required autofocus autocomplete="off" placeholder="you@gmail.com"></label>
     <label>App password <input name="password" type="password" required autocomplete="off" placeholder="16 letters"></label>
     <p class="field-help">Create one at <a href="https://myaccount.google.com/apppasswords" data-external>myaccount.google.com/apppasswords</a>
        (the account needs 2-Step Verification on).</p>
@@ -108,7 +108,7 @@
 <dialog id="trust-dialog">
   <h2>Is this sender genuine?</h2>
   <div class="body"></div>
-  <form method="dialog" class="row"><button class="primary">Close</button></form>
+  <form method="dialog" class="row"><button autofocus>Close</button></form>
 </dialog>
 
 <dialog id="colour-dialog">
@@ -124,14 +124,14 @@
   <div id="colour-any-row"><span id="colour-now"></span><input id="colour-hex" spellcheck="false" autocomplete="off" maxlength="7" aria-label="Color as #rrggbb"></div>
   <div id="colour-sample"><button class="primary" tabindex="-1">Button</button><button class="toggle" aria-pressed="true" tabindex="-1">Filter on</button><span class="token">is:unread</span></div>
   </div>
-  <div class="row"><button id="colour-reset">Back to default</button><button id="colour-done" class="primary">Done</button></div>
+  <div class="row"><button id="colour-reset">Back to default</button><button id="colour-done" autofocus>Done</button></div>
 </dialog>
 
 <dialog id="subs-dialog">
   <h2>Subscriptions</h2>
   <p id="subs-note">Senders you can unsubscribe from, busiest first. After unsubscribing it can take a few days for mail to stop.</p>
   <div id="subs-list"></div>
-  <div class="row"><span id="subs-sum"></span><button id="subs-clear" hidden></button><span class="spring"></span><button id="subs-close">Close</button></div>
+  <div class="row"><span id="subs-sum"></span><button id="subs-clear" hidden></button><span class="spring"></span><button id="subs-close" autofocus>Close</button></div>
 </dialog>
 
 <dialog id="doctor-dialog">
@@ -151,7 +151,7 @@
   </div>
   <div id="doctor-log" tabindex="0"></div>
   <p id="doctor-note">Commands, sizes and timings since Unibox started. The mail itself is never recorded here, and nothing is kept after you close the app.</p>
-  <div class="row"><button id="doctor-copy">Copy activity</button><button id="doctor-again">Check again</button><button id="doctor-close" class="primary">Close</button></div>
+  <div class="row"><button id="doctor-copy">Copy activity</button><button id="doctor-again">Check again</button><button id="doctor-close" autofocus>Close</button></div>
 </dialog>
 
 <dialog id="help-dialog">
@@ -185,7 +185,7 @@
     <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Show only that account (<kbd>0</kbd> for all)</td></tr>
   </table>
   </div>
-  <form method="dialog" class="row"><button class="primary">Close</button></form>
+  <form method="dialog" class="row"><button autofocus>Close</button></form>
 </dialog>
 
 <!-- An attachment shown in place: a picture, a PDF, or text. -->
