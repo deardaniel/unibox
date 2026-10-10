@@ -206,8 +206,10 @@ function renderAccounts() {
   const item = (id, name, color, unread, acct) => {
     const b = el("button", "acct" + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : "") + (unread ? "" : " zero"));
     b.style.setProperty("--c", color);
-    const dot = el("span", "dot");
-    b.append(dot, el("span", "n", unread || ""), el("span", "name", name));
+    // the leading slot is all that shows while the rail is closed
+    const lead = el("span", "lead");
+    lead.append(el("span", "dot"), el("span", "n", unread || ""));
+    b.append(lead, el("span", "name", name));
     if (number < 10) { const k = el("span", "key"); k.dataset.key = number; b.append(k); }
     number++;
     b.title = acct ? (acct.last_error ? tx("{email}: sync problem: {error}", { email: acct.email, error: acct.last_error }) : acct.email) : tx("All inboxes");
