@@ -322,6 +322,7 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .sub .who > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub .addr { color: var(--muted); font-size: 12.5px; }
 /* the two actions are plain until pointed at, so a long list is not a wall of buttons */
+.sub .clear { margin-left: -9px; }   /* the icon belongs to the count beside it */
 .sub .clear button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--muted); }
 .sub .clear button:hover { color: var(--ink); background: var(--panel); border-color: var(--line); }
 .sub .leave { text-align: right; }
