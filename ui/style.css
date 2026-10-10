@@ -534,6 +534,10 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #colour-sample .token { max-width: none; padding-right: var(--s2); }
 
 #subs-dialog { width: min(820px, 94vw); }
+/* the footer: what there is on the left, the way out on the right */
+#subs-dialog .row { align-items: center; }
+#subs-dialog .spring { flex: 1; }
+#subs-sum { color: var(--muted); font-size: var(--fs-small); font-variant-numeric: tabular-nums; }
 #subs-note { font-size: var(--fs-small); }
 #subs-list { max-height: min(64vh, 660px); overflow-y: auto; margin: 0 -8px var(--s3); }
 #subs-list .empty { padding: var(--s5); text-align: center; color: var(--muted); }

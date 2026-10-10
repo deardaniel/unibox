@@ -1028,6 +1028,35 @@ async function openSubscriptions() {
   box.textContent = "";
   if (!rows.length) box.append(el("div", "empty", tx("No senders with an unsubscribe link yet.")));
   const n = x => x ? fmtNum(x) : "";
+  // The footer: how many senders, how much of their mail is still in the inbox, and a button
+  // that archives all of that at once. Redrawn whenever a row changes.
+  const clearing = new Map();   // row -> what to do to it when its inbox mail has gone
+  const sum = () => {
+    const left = rows.reduce((total, r) => total + (r.in_inbox || 0), 0);
+    $("#subs-sum").textContent = rows.length ? txn(rows.length, "{n} sender", "{n} senders") + " · " + tx("{n} still in your inbox", { n: fmtNum(left) }) : "";
+    const all = $("#subs-clear");
+    all.hidden = !left;
+    all.textContent = tx("Archive all {n}", { n: fmtNum(left) });
+    all.onclick = async () => {
+      all.disabled = true;
+      // every conversation in the inbox from every sender listed, as one action: one z undoes it
+      const found = new Map();
+      const senders = rows.filter(r => r.in_inbox);
+      for (let i = 0; i < senders.length; i += 8) {
+        const lists = await Promise.all(senders.slice(i, i + 8).map(r => api(`/api/message/${r.id}/same-source`).catch(() => [])));
+        for (const t of lists.flat()) found.set(key(t), t);
+      }
+      all.disabled = false;
+      if (!found.size) return;
+      const wasOpen = [...found.keys()].includes(state.open?.key);
+      act("archive", [...found.values()]);
+      if (wasOpen) leaveConversation();
+      for (const r of senders) { r.in_inbox = 0; clearing.get(r)?.(); }
+      sum();
+      toast(txn(found.size, "Archived.", "{n} conversations archived."), { undo: true });
+    };
+  };
+  sum();
   // A table: who, and how much they send. The row itself opens the sender's mail; the two
   // things that change anything sit quietly at the end of it.
   const head = el("div", "sub head");
@@ -1057,9 +1086,12 @@ async function openSubscriptions() {
       b.onclick = async e => {
         e.stopPropagation();
         if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // nothing was there
+        r.in_inbox = 0;
         b.remove();
         inbox.textContent = "";
+        sum();
       };
+      clearing.set(r, () => { b.remove(); inbox.textContent = ""; });
       clear.append(b);
     }
     const unsub = unsubscribeButton(m);
@@ -1826,6 +1858,7 @@ async function undo() {
     api("/api/unarchive", { body: { account_id: t.account_id, msgids: done.msgids } })
       .catch(e => { toast(tx("Couldn't undo: {why}", { why: txServer(e.message) })); refreshSoon(); });
   }
+  if ($("#subs-dialog").open) setTimeout(openSubscriptions, 600);   // its counts are from before
 }
 
 /** After archiving: move on to the conversation that took its place in the list. */
