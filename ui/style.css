@@ -147,65 +147,67 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 
 /* ---- main ---- */
 main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: column; min-width: 0; }
-#top { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+#top { display: flex; gap: var(--s2); padding: 10px 14px; border-bottom: 1px solid var(--line); }
 /* The search field: a magnifier, where it is looking, the filters that are on, then what is typed. */
-#query { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 10px;
-         background: var(--panel); border: 1px solid var(--line); border-radius: 8px; cursor: text; }
+#query { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; gap: 6px; padding: 0 var(--s2) 0 10px;
+         background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); cursor: text; }
+/* the field's own focus: the accent border plus a one-pixel ring (DESIGN.md, the search field) */
 #query:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 #query > svg { flex: none; color: var(--muted); }
-#scope { flex: none; display: flex; align-items: center; gap: 3px; height: 24px; padding: 0 5px 0 8px; border: 0; border-radius: 5px;
-         background: var(--hover); font-weight: 600; font-size: 13px; white-space: nowrap; }
+#scope { flex: none; display: flex; align-items: center; gap: 3px; height: 24px; padding: 0 5px 0 var(--s2); border: 0; border-radius: var(--r-sm);
+         background: var(--hover); font-weight: 600; font-size: var(--fs-small); white-space: nowrap; }
 #scope svg { color: var(--muted); order: 2; }
-#scope::after { margin-left: 4px !important; }
+#scope::after { margin-left: var(--s1) !important; }
 #scope:hover:where(:not(:disabled)) { background: var(--line); }
 #scope[aria-pressed="true"] { background: var(--tint); color: var(--accent); }
 #scope[aria-pressed="true"] svg { color: inherit; }
 #tokens { display: contents; }
-.token { flex: none; display: flex; align-items: center; height: 24px; padding: 0 2px 0 8px; border-radius: 5px; white-space: nowrap;
-         background: var(--tint); color: var(--accent); font: 12.5px "Cascadia Mono", Consolas, ui-monospace, monospace; max-width: 40%; }
-.token button { flex: none; width: 20px; height: 20px; margin-left: 2px; padding: 0; border: 0; border-radius: 4px; background: none;
-                color: inherit; font: 15px/1 system-ui, sans-serif; display: grid; place-items: center; }
+.token { flex: none; display: flex; align-items: center; height: 24px; padding: 0 2px 0 var(--s2); border-radius: var(--r-sm); white-space: nowrap;
+         background: var(--tint); color: var(--accent); font: var(--fs-mono) var(--mono); max-width: 40%; }
+.token button { flex: none; width: 20px; height: 20px; margin-left: 2px; padding: 0; border: 0; border-radius: var(--r-sm); background: none;
+                color: inherit; font: var(--fs-subtitle)/1 var(--font); display: grid; place-items: center; }
 .token button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 #search { flex: 1; min-width: 60px; height: 100%; font: inherit; color: inherit; background: none; border: 0; outline: 0; padding: 0; }
+#search:focus-visible { box-shadow: none; }   /* the field around it shows the focus */
 #suggest { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; width: min(460px, 100%); padding: 5px;
-           background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.18); cursor: default; }
-#suggest .opt { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 32px; padding: 0 9px; border-radius: 6px; }
+           background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-float); cursor: default; }
+#suggest .opt { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: var(--control-h); padding: 0 9px; border-radius: var(--r); }
 #suggest .opt.at, #suggest .opt:hover { background: var(--tint); }
-#suggest .word { font: 13px "Cascadia Mono", Consolas, ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#suggest .word { font: var(--fs-mono) var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #suggest .word b { color: var(--accent); font-weight: 600; }
-#suggest .hint { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
-#suggest .group { padding: 6px 9px 2px; margin-top: 4px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
-#suggest .keys { padding: 6px 9px 3px; color: var(--muted); font-size: 11.5px; white-space: pre; }
+#suggest .hint { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--fs-caption); }
+#suggest .group { padding: 6px 9px 2px; margin-top: var(--s1); border-top: 1px solid var(--line); color: var(--muted); font-size: var(--fs-caption); }
+#suggest .keys { padding: 6px 9px 3px; color: var(--muted); font-size: var(--fs-caption); white-space: pre; }
 /* The sync button's border fills clockwise as the next automatic check approaches.
    --p is how far along the wait is, 0 to 1. */
 @property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
-#sync { display: flex; align-items: center; justify-content: center; width: 34px; padding: 0; font-size: 16px;
-        border: 1px solid transparent; transition: --p 1s linear;
+#sync { display: flex; align-items: center; justify-content: center; width: var(--control-h); padding: 0; font-size: var(--fs-subtitle);
+        border: 1px solid transparent; transition: --p var(--t-spin) linear;
         background: linear-gradient(var(--panel), var(--panel)) padding-box,
                     conic-gradient(var(--accent) calc(var(--p) * 360deg), var(--line) 0) border-box; }
 #sync:hover { background: linear-gradient(var(--hover), var(--hover)) padding-box,
                           conic-gradient(var(--accent) calc(var(--p) * 360deg), var(--line) 0) border-box; }
 #sync.busy { transition: none; }
-#sync.live { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); color: var(--accent);
-             background: var(--panel); box-shadow: 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
+#sync.live { border-color: var(--accent-line); color: var(--accent); background: var(--panel); }
 #sync.live:hover { background: var(--hover); }
 /* every control in the two toolbars is the same height */
-#top > *, #thread-bar button { height: 34px; }
+#top > *, #thread-bar button { height: var(--control-h); }
 /* drawn, not a text glyph: a glyph sits wherever its font puts it, which was not the middle */
 #sync .spin { display: block; }
-#sync.busy .spin { animation: spin 1s linear infinite; }
+#sync.busy .spin { animation: spin var(--t-spin) linear infinite; }
 #sync.busy { color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
-#ask { display: grid; place-items: center; width: 34px; padding: 0; color: var(--accent); }
+#ask { display: grid; place-items: center; width: var(--control-h); padding: 0; color: var(--accent); }
 #ask.on { background: var(--hover); }
 /* The bar's filter buttons: plain while off, tinted with the accent while on (a filter in
    force, not a mode), the same as the pieces in the search field. People and Automated are a
    joined pair because at most one of them is on. */
 .seg { display: flex; flex: none; }
 .seg button { border-radius: 0; margin-left: -1px; }
-.seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
-.seg button:last-child { border-radius: 0 8px 8px 0; }
-.toggle { padding: 0 12px; white-space: nowrap; }
+.seg button:first-child { border-radius: var(--r) 0 0 var(--r); margin-left: 0; }
+.seg button:last-child { border-radius: 0 var(--r) var(--r) 0; }
+.seg button:focus-visible { position: relative; z-index: 1; }   /* the ring clears its neighbour */
+.toggle { padding: 0 var(--s3); white-space: nowrap; }
 .toggle[aria-pressed="true"] { background: var(--tint); border-color: var(--accent); color: var(--accent); font-weight: 600;
   position: relative; }
 .toggle[aria-pressed="true"]:hover { background: var(--tint); filter: brightness(.97); }
