@@ -269,6 +269,9 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 .row-t:hover { background-image: linear-gradient(color-mix(in srgb, var(--ink) 5%, transparent) 0 0); }
 .row-t.open { background-image: linear-gradient(color-mix(in srgb, var(--ink) 10%, transparent) 0 0); }
 .row-t.sel { background-color: var(--tint); }
+/* and a tick over the avatar: with a grey picked colour the tint alone looks like any other shade */
+.row-t.sel .av::after { content: "✓"; position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center;
+                        background: var(--accent); color: var(--on-accent); font-size: var(--fs-body); }
 /* the cursor marker runs the full height of the row, whatever its padding */
 .row-t.cursor::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--cursor); }
 .row-t .bar { grid-area: bar; }
