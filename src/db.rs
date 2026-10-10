@@ -668,8 +668,10 @@ impl Db {
     ) -> Result<(Vec<String>, Vec<Vec<serde_json::Value>>, bool)> {
         use rusqlite::types::ValueRef;
         use rusqlite::OpenFlags;
-        let lowered = sql.to_ascii_lowercase();
-        if ["attach", "pragma", "load_extension"].iter().any(|w| lowered.contains(w)) {
+        // as whole words: the view has a column called has_attachments
+        static BARRED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let barred = BARRED.get_or_init(|| regex::Regex::new(r"(?i)\b(attach|detach|pragma|load_extension)\b").unwrap());
+        if barred.is_match(sql) {
             anyhow::bail!("only plain SELECT queries are allowed");
         }
         let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
@@ -813,6 +815,17 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_assistant_can_ask_about_attachments_but_not_attach_files() {
+        let dir = std::env::temp_dir().join(format!("unibox-test-q-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(&dir.join("q.db")).unwrap();
+        assert!(db.agent_query("SELECT message_id, has_attachments FROM mail", 5, 40).is_ok());
+        assert!(db.agent_query("ATTACH DATABASE 'x.db' AS x", 5, 40).is_err());
+        assert!(db.agent_query("SELECT 1; PRAGMA writable_schema=1", 5, 40).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn search_words_go_to_the_index_unless_one_is_too_short() {
