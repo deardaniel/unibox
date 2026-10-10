@@ -155,9 +155,13 @@ Icon-only buttons are square at their height and carry an `aria-label`. Colour s
 32 px circles.
 
 **Keys on controls.** The `data-key` badge sits after the label: `--mono` at `--fs-key`,
-`--r-sm`, hairline border, `--muted`. On an *on* control it takes the control's colour and
-`--accent-line` border. A key for a group goes on the group (`Shift+F` on the People /
-Automated pair). Icon-only buttons have no room for a badge: their key goes in the tooltip
+`--r-sm`, hairline border, `--muted`. It is a fixed box (18 px high, at least 18 px wide,
+glyph centred), and the control is a flex row that centres it, so every badge sits on the same
+line whatever its letter (`e`, `⇧U`, `⇧↵`). It never rides on the text baseline. On an *on*
+control it takes the control's colour and `--accent-line` border. A key for a group goes on
+the group as a trailing cap inside its outline (`⇧F` on the People / Automated pair): the
+full control height, joined to the last segment, `--bg` behind, not clickable. It must read as
+part of the pair, never as a separate control. Icon-only buttons have no room for a badge: their key goes in the tooltip
 (`Ctrl+K` on the assistant). Account number keys show on each account when the rail opens.
 
 **Filter toggles.** Off: a plain button. On: `--tint` background, `--accent` border and text,

@@ -96,9 +96,13 @@ a { color: var(--accent); }
 :where(button, a, input, select, textarea, summary, [tabindex="0"]):focus-visible { outline: none; box-shadow: var(--focus); }
 kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); border-bottom-width: 2px;
       border-radius: var(--r-sm); padding: 2px 5px; background: var(--panel); }
-/* the key that does the same thing, shown on the control itself */
-[data-key]:not([data-key=""])::after { content: attr(data-key); margin-left: var(--s2); padding: 1px var(--s1); border: 1px solid var(--line);
-  border-radius: var(--r-sm); font: 400 var(--fs-key)/1.3 var(--mono); color: var(--muted); white-space: nowrap; }
+/* The key that does the same thing, shown on the control itself. The control is a row that
+   centres its label and the badge, and the badge is a box of fixed height with its glyph in the
+   middle, so every badge sits on one line whatever its letter: it never rides on the baseline. */
+[data-key]:not([data-key=""]):not([hidden]) { display: inline-flex; align-items: center; gap: var(--s2); }
+[data-key]:not([data-key=""])::after { content: attr(data-key); flex: none; box-sizing: border-box; height: 18px; min-width: 18px; padding: 0 4px;
+  display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r-sm);
+  font: 400 var(--fs-key)/1 var(--mono); color: var(--muted); white-space: nowrap; }
 [aria-pressed="true"][data-key]::after { color: inherit; border-color: var(--accent-line); }
 
 /* ---- sidebar: a rail that opens over the content on hover ---- */
@@ -142,7 +146,6 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 .acct.all .n { color: var(--bg); }
 .acct .name, .acct .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .acct .key { font-weight: 400; }
-.acct .key::after { margin-left: 0; }
 /* The remove button only takes up room on the row being pointed at. */
 .acct .rm, .acct .pw { display: none; }
 #side .acct:hover .rm { display: revert; }
@@ -178,10 +181,9 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 /* the field's own focus: the accent border plus a one-pixel ring (DESIGN.md, the search field) */
 #query:focus-within { border-color: var(--accent); box-shadow: var(--focus-field); }
 #query > svg { flex: none; color: var(--muted); }
-#scope { flex: none; display: flex; align-items: center; gap: 3px; height: var(--control-h-sm); padding: 0 5px 0 var(--s2); border: 0; border-radius: var(--r-sm);
+#scope { flex: none; display: flex; align-items: center; gap: 6px; height: var(--control-h-sm); padding: 0 5px 0 var(--s2); border: 0; border-radius: var(--r-sm);
          background: var(--hover); font-weight: 600; font-size: var(--fs-small); white-space: nowrap; }
 #scope svg { color: var(--muted); order: 2; }
-#scope::after { margin-left: var(--s1) !important; }
 #scope:hover:where(:not(:disabled)) { background: var(--line); }
 #scope[aria-pressed="true"] { background: var(--tint); color: var(--accent); }
 #scope[aria-pressed="true"] svg { color: inherit; }
