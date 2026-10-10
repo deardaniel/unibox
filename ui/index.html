@@ -141,14 +141,13 @@
   <div id="doctor-rows"></div>
   <div id="doctor-bar">
     <h3>Activity</h3>
-    <div id="doctor-show" class="seg" role="group" aria-label="Which activity to show">
-      <button data-show="" class="toggle" aria-pressed="true">Everything</button>
+    <div id="doctor-show" role="group" aria-label="Which activity to show: none on shows everything">
       <button data-show="imap" class="toggle" aria-pressed="false">Gmail</button>
       <button data-show="model" class="toggle" aria-pressed="false">Assistant</button>
       <button data-show="mcp" class="toggle" aria-pressed="false">Other assistants</button>
       <button data-show="app" class="toggle" aria-pressed="false">App</button>
     </div>
-    <label id="doctor-problems-row"><input type="checkbox" id="doctor-problems"> Only problems</label>
+    <button id="doctor-problems" class="toggle" aria-pressed="false" title="Only what went wrong">Problems</button>
   </div>
   <div id="doctor-log" tabindex="0"></div>
   <p id="doctor-note">Commands, sizes and timings since Unibox started. The mail itself is never recorded here, and nothing is kept after you close the app.</p>

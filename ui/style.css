@@ -600,11 +600,11 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 .sub .unsub:disabled { color: var(--muted); opacity: 1; cursor: default; }
 .sub.done .who, .sub.done .num { opacity: .55; }
 
-#doctor-dialog { width: min(980px, 95vw); }
+#doctor-dialog { width: min(1080px, 95vw); }
 /* The status rows, grouped by subsystem: on the left, in a fixed column, an icon tile with the
    subsystem's name and how it is reached; on the right, its rows. Hairlines between groups. */
 #doctor-rows { margin-bottom: var(--s4); }
-.dg { display: grid; grid-template-columns: 190px minmax(0, 1fr); column-gap: var(--s3); padding: 10px 0; border-top: 1px solid var(--line); }
+.dg { display: grid; grid-template-columns: 170px minmax(0, 1fr); column-gap: var(--s3); padding: 10px 0; border-top: 1px solid var(--line); }
 .dg:first-child { border-top: 0; padding-top: 0; }
 .dg-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .dg-head .tile { flex: none; width: 28px; height: 28px; border-radius: var(--r); background: var(--hover); color: var(--muted);
@@ -612,7 +612,9 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 .dg-head .name { font-weight: 600; line-height: 18px; }
 .dg-head .tag { font: var(--fs-key)/1.3 var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 var(--s1); }
 .dg-rows { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; padding-top: 3px; }
-.dr { display: grid; grid-template-columns: 9px minmax(120px, 230px) minmax(0, 1fr); column-gap: 10px; align-items: baseline; }
+/* a row: its dot, what it is, what there is to say, and on the right a figure worth lining up */
+.dr { display: grid; grid-template-columns: 9px minmax(90px, 170px) minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; }
+.dr .count { color: var(--muted); font-size: var(--fs-small); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 /* the dot sits on the first line of what it is about */
 .dr .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); align-self: start; margin-top: 6px; }
 .dr .dot.ok { background: var(--ok); }
@@ -633,17 +635,23 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 .dr .legend { display: flex; flex-wrap: wrap; gap: var(--s1) 14px; align-items: center; }
 .dr .legend .item { white-space: nowrap; }
 .dr .legend i { display: inline-block; width: 9px; height: 9px; border-radius: var(--r-sm); margin-right: 6px; }
-.dr .p1 { background: color-mix(in srgb, var(--ink) 72%, var(--panel)); }
-.dr .p2 { background: color-mix(in srgb, var(--ink) 48%, var(--panel)); }
-.dr .p3 { background: color-mix(in srgb, var(--ink) 32%, var(--panel)); }
-.dr .p4 { background: color-mix(in srgb, var(--ink) 20%, var(--panel)); }
-.dr .p5 { background: color-mix(in srgb, var(--ink) 11%, var(--panel)); }
+/* four steps of lightness far enough apart to tell at a glance in either theme; what is left
+   over is an outline only */
+.dr .p1 { background: color-mix(in srgb, var(--ink) 88%, var(--panel)); }
+.dr .p2 { background: color-mix(in srgb, var(--ink) 60%, var(--panel)); }
+.dr .p3 { background: color-mix(in srgb, var(--ink) 36%, var(--panel)); }
+.dr .p4 { background: color-mix(in srgb, var(--ink) 17%, var(--panel)); }
+.dr .p5 { background: var(--panel); outline: 1px solid var(--line); outline-offset: -1px; }
 #doctor-bar { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); flex-wrap: wrap; }
 #doctor-bar h3 { margin: 0 auto 0 0; font-size: var(--fs-subtitle); line-height: 22px; }
 #doctor-bar .toggle { font-size: var(--fs-small); }
-#doctor-problems-row { display: flex; align-items: center; gap: 6px; margin: 0; }
-#doctor-problems-row input { width: auto; margin: 0; }
-#doctor-log { height: 320px; min-height: 96px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg);
+#doctor-show { display: flex; gap: 6px; flex-wrap: wrap; }
+#doctor-problems { font-variant-numeric: tabular-nums; }
+/* The log is what gives way when the window is short. Only once it is down to a few lines do the
+   status rows above it start to scroll as well, so the footer is never pushed out of sight. */
+#doctor-dialog #doctor-rows { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+#doctor-dialog #doctor-log { flex: 1 1000 auto; min-height: 96px; }
+#doctor-log { height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg);
   padding: 6px 0; font: var(--fs-mono)/18px var(--mono); }
 #doctor-log:focus-visible { box-shadow: none; outline: 2px solid var(--accent); outline-offset: -2px; }
 #doctor-log .ln { display: grid; grid-template-columns: 62px 150px 1fr 62px; gap: 0 10px; padding: 1px 10px; white-space: nowrap; }
@@ -651,7 +659,8 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #doctor-log .ln > * { overflow: hidden; text-overflow: ellipsis; }
 #doctor-log .at, #doctor-log .ms { color: var(--muted); }
 #doctor-log .ms { text-align: right; }
-#doctor-log .who { color: var(--accent); }
+#doctor-log .who { color: var(--ink); }
+#doctor-log .who i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; }
 #doctor-log .out { color: var(--muted); }
 #doctor-log .ln.bad .what, #doctor-log .ln.bad .out { color: var(--danger); }
 #doctor-log .ln.wide { white-space: normal; }

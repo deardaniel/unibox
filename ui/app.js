@@ -1115,7 +1115,7 @@ async function openSubscriptions() {
 // ---- doctor -----------------------------------------------------------
 /** What the app is connected to, how each connection is doing and what it keeps on disk, with a running record of
  *  what it says to Gmail, to the assistant's model and to other assistants. */
-const doctor = { after: 0, lines: [], show: "", problems: false, timer: 0, seen: null };
+const doctor = { after: 0, lines: [], show: new Set(), problems: false, timer: 0, seen: null };
 const ago = ms => {
   const s = Math.round((Date.now() - ms) / 1000), f = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
   return s < 45 ? tx("just now") : s < 3600 ? f.format(-Math.round(s / 60), "minute") : s < 86400 ? f.format(-Math.round(s / 3600), "hour") : f.format(-Math.round(s / 86400), "day");
@@ -1134,7 +1134,7 @@ function doctorGroup(box, glyph, name, tag) {
   return rows;
 }
 /** One status row: a coloured dot, a name, and what there is to say about it. */
-function doctorRow(box, state, name, parts) {
+function doctorRow(box, state, name, parts, count = "") {
   const said = el("div", "said");
   parts.filter(Boolean).forEach((p, i) => {
     if (i) said.append(" · ");
@@ -1143,7 +1143,7 @@ function doctorRow(box, state, name, parts) {
   const dot = el("span", "dot " + state);
   dot.title = { ok: tx("Working"), warn: tx("Working, with something to look at"), bad: tx("Not working"), busy: tx("Checking…"), off: tx("Not in use") }[state];
   const row = el("div", "dr");
-  row.append(dot, el("div", "name", name), said);
+  row.append(dot, el("div", "name", name), said, el("div", "count", count));
   box.append(row);
   return said;
 }
@@ -1160,10 +1160,9 @@ function showDoctor(d) {
       a.last_error && bad(tx("Last sync failed: {why}", { why: txServer(a.last_error) })),
       a.watching ? tx("watching the inbox live") : tx("not watching live, checking on a timer"),
       a.last_sync && tx("synced {when}", { when: ago(a.last_sync * 1000) }),
-      txn(a.messages, "{n} message listed", "{n} messages listed"),
       a.doing ? txServer(a.doing) : a.listing && tx("Listing older mail…"),
       a.waiting ? txn(a.waiting, "{n} change waiting to reach Gmail", "{n} changes waiting to reach Gmail") : "",
-    ]);
+    ], txn(a.messages, "{n} message listed", "{n} messages listed"));
   }
   if (!d.accounts.length) doctorRow(mail, "off", "Gmail", [tx("No accounts yet.")]);
 
@@ -1183,7 +1182,7 @@ function showDoctor(d) {
 
   const building = !d.store.search_ready || /search index/i.test(d.sync.activity || "");
   doctorRow(doctorGroup(box, "search", tx("Search index"), tx("local")), building ? "busy" : "ok", tx("Full text of all mail"),
-    [building ? tx("search index being built") : tx("search index ready")]);
+    [building ? tx("Search index being built") : tx("Search index ready")]);
 
   showDisk(doctorGroup(box, "disk", tx("Disk"), tx("local")), d.disk);
   // Drawn afresh only when something it says has changed, so a pulsing dot is not restarted
@@ -1196,7 +1195,7 @@ const fmtBig = n => n < 1073741824 ? fmtSize(n) : (n / 1073741824).toLocaleStrin
  *  legend, where the two parts that can be let go carry the button that does it. */
 function showDisk(box, k) {
   if (!k) return doctorRow(box, "busy", tx("Local data"), [tx("Measuring…")]);
-  const said = doctorRow(box, "ok", tx("Local data"), [el("b", "", tx("{size} in all", { size: fmtBig(k.total) })), el("span", "path", k.folder)]);
+  const said = doctorRow(box, "ok", tx("Local data"), [el("span", "path", k.folder)], tx("{size} in all", { size: fmtBig(k.total) }));
   // downloaded copies of conversations that have left the inbox can go: Gmail still has them
   let trim = null, clear = null;
   if (k.spare_count && k.spare > 1048576) {
@@ -1250,13 +1249,24 @@ function showDisk(box, k) {
   });
   said.append(bar, legend);
 }
-const doctorShows = l => (!doctor.show || l.channel === doctor.show) && (!doctor.problems || !l.ok);
+// which sources are on (none on shows them all), and whether only what went wrong
+const doctorSource = l => !doctor.show.size || doctor.show.has(l.channel);
+const doctorShows = l => doctorSource(l) && (!doctor.problems || !l.ok);
+/** The Problems toggle says how many there are among what is showing. */
+function countProblems() {
+  $("#doctor-problems").textContent = tx("Problems · {n}", { n: fmtNum(doctor.lines.filter(l => doctorSource(l) && !l.ok).length) });
+}
 function doctorLine(l) {
   const row = el("div", "ln" + (l.ok ? "" : " bad"));
   const what = el("span", "what", l.what);
   if (l.outcome) what.append(el("span", "out", "  →  " + l.outcome));
   const who = { imap: l.who, model: l.who, mcp: l.who || "MCP", app: "Unibox" }[l.channel] || l.who;
-  row.append(el("span", "at", new Date(l.at).toLocaleTimeString(LOCALE, { hour12: false })), el("span", "who", who), what,
+  // whose it is, with the account's own colour beside it where it is an account's
+  const whose = el("span", "who"), dot = el("i");
+  const acct = l.channel === "imap" && state.accounts.find(a => a.email === l.who);
+  if (acct) dot.style.background = acct.color;
+  whose.append(dot, who);
+  row.append(el("span", "at", new Date(l.at).toLocaleTimeString(LOCALE, { hour12: false })), whose, what,
     el("span", "ms", l.ms == null ? "" : l.ms < 1000 ? l.ms + " ms" : secs(l.ms)));
   row.title = who;
   row.onclick = () => row.classList.toggle("wide");   // a long command, in full
@@ -1268,6 +1278,7 @@ function fillDoctorLog() {
   if (!lines.length) box.append(el("div", "empty", tx("Nothing yet.")));
   box.append(...lines.slice(-1500).map(doctorLine));
   box.scrollTop = box.scrollHeight;
+  countProblems();
 }
 async function pollDoctor() {
   if (!$("#doctor-dialog").open) return;
@@ -1279,6 +1290,7 @@ async function pollDoctor() {
       const box = $("#doctor-log"), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
       doctor.lines.push(...d.lines);
       doctor.lines.splice(0, doctor.lines.length - 3000);
+      countProblems();
       const fresh = d.lines.filter(doctorShows);
       if (fresh.length) {
         box.querySelector(".empty")?.remove();
@@ -1307,11 +1319,16 @@ $("#doctor-again").onclick = () => api("/api/doctor", { method: "POST" }).catch(
 $("#doctor-show").onclick = e => {
   const b = e.target.closest("button");
   if (!b) return;
-  doctor.show = b.dataset.show;
-  for (const x of $("#doctor-show").children) x.setAttribute("aria-pressed", x === b);
+  // each source is a toggle of its own
+  doctor.show.has(b.dataset.show) ? doctor.show.delete(b.dataset.show) : doctor.show.add(b.dataset.show);
+  b.setAttribute("aria-pressed", doctor.show.has(b.dataset.show));
   fillDoctorLog();
 };
-$("#doctor-problems").onchange = e => { doctor.problems = e.target.checked; fillDoctorLog(); };
+$("#doctor-problems").onclick = e => {
+  doctor.problems = !doctor.problems;
+  e.currentTarget.setAttribute("aria-pressed", doctor.problems);
+  fillDoctorLog();
+};
 $("#doctor-copy").onclick = async () => {
   const text = doctor.lines.filter(doctorShows).map(l =>
     [new Date(l.at).toISOString(), l.channel, l.who, l.what, l.outcome, l.ms == null ? "" : l.ms + " ms", l.ok ? "" : "FAILED"].join("\t")).join("\n");
