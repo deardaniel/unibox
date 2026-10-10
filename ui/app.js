@@ -1855,7 +1855,9 @@ function act(op, list = targets(), { record = true } = {}) {
       .finally(() => settled(k));
     if (!undoing) lastAction.items.push({ t: row || t, index, sent });
   }
-  state.selected.clear();
+  // Marking and starring leave the selection alone, so the same conversations can be marked
+  // read and then archived. Archiving them is what ends it: they have gone from the list.
+  if (op === "archive" || op === "inbox") state.selected.clear();
   renderList();
   updateThreadBar();
   if (record) {
