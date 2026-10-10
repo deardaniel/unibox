@@ -304,23 +304,29 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
                white-space: nowrap; pointer-events: none; }
 #link-status.lie { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; }
 #trust-dialog { width: min(560px, 92vw); }
-#subs-dialog { width: min(980px, 94vw); }
-#subs-list { max-height: min(62vh, 640px); overflow-y: auto; margin: 0 -6px 12px; }
+#subs-dialog { width: min(820px, 94vw); }
+#subs-note { font-size: 13px; }
+#subs-list { max-height: min(64vh, 660px); overflow-y: auto; margin: 0 -8px 12px; }
 #subs-list .empty { padding: 24px; text-align: center; color: var(--muted); }
-/* a table: avatar, sender, three counts, three things to do */
-.sub { display: grid; grid-template-columns: 28px minmax(0, 1fr) 96px 60px 68px 112px 96px 96px; align-items: center;
-  column-gap: 10px; padding: 7px 6px; border-radius: 8px; }
-.sub:not(.head):hover { background: var(--hover); }
+/* a table: avatar, sender, three counts, archive what is in the inbox, unsubscribe */
+.sub { display: grid; grid-template-columns: 28px minmax(0, 1fr) 92px 56px 60px 28px 104px; align-items: center;
+  column-gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; outline: none; }
+.sub:not(.head):hover, .sub:focus-visible { background: var(--hover); }
 .sub.head { position: sticky; top: 0; z-index: 1; background: var(--panel); border-radius: 0; border-bottom: 1px solid var(--line);
-  color: var(--muted); font-size: 12px; padding-top: 2px; }
+  color: var(--muted); font-size: 12px; padding-top: 2px; cursor: default; }
 .sub .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sub:not(.head) .num { color: var(--muted); }
 .sub .av { position: relative; }
 .sub .who { min-width: 0; }
 .sub .who > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sub .name { font-weight: 600; }
 .sub .addr { color: var(--muted); font-size: 12.5px; }
-.sub button { width: 100%; padding: 4px 0; font-size: 13px; white-space: nowrap; }
-.sub .unsub:disabled, .sub .unsub:disabled:hover { background: none; border-color: transparent; color: var(--muted); cursor: default; }
+/* the two actions are plain until pointed at, so a long list is not a wall of buttons */
+.sub .clear button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--muted); }
+.sub .clear button:hover { color: var(--ink); background: var(--panel); border-color: var(--line); }
+.sub .leave { text-align: right; }
+.sub .unsub { background: none; border-color: transparent; color: var(--accent); padding: 4px 8px; font-size: 13px; white-space: nowrap; }
+.sub .unsub:hover:not(:disabled) { background: var(--panel); border-color: var(--line); }
+.sub .unsub:disabled { color: var(--muted); opacity: 1; cursor: default; }
 .sub.done .who, .sub.done .num { opacity: .55; }
 #subs { color: var(--muted); }
 #subs .plus { width: 13px; display: grid; place-items: center; flex: none; }

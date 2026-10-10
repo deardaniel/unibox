@@ -36,6 +36,7 @@ const key = t => t.account_id + ":" + t.thrid;
 // Small icons are drawn rather than typed: a text glyph looks however the font happens to
 // draw it (the "more" ellipsis came out as three dashes).
 const ICONS = {
+  archive: '<path d="M2 3.5h12v3H2zM3 6.5v6h10v-6M6.3 9.2h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>',
   more: '<circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/>',
   key: '<circle cx="5" cy="11" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 9l6-6M10.5 5.5l2 2M12.6 3.4l1.2 1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
   verified: '<path d="M8 1.5 13.5 3.6v4.1c0 3.3-2.2 5.7-5.5 6.8-3.3-1.1-5.5-3.5-5.5-6.8V3.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.6 8.1 7.4 9.9 10.6 6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -842,13 +843,16 @@ async function openSubscriptions() {
   box.textContent = "";
   if (!rows.length) box.append(el("div", "empty", "No senders with an unsubscribe link yet."));
   const n = x => x ? x.toLocaleString() : "";
-  // a table: who, how much they send, and one column per thing to do, so the buttons line up
+  // A table: who, and how much they send. The row itself opens the sender's mail; the two
+  // things that change anything sit quietly at the end of it.
   const head = el("div", "sub head");
   head.append(el("span"), el("span", "", "Sender"), el("span", "num", "Last 3 months"), el("span", "num", "In all"),
-    el("span", "num", "In inbox"), el("span"), el("span"), el("span"));
+    el("span", "num", "In inbox"), el("span"), el("span"));
   if (rows.length) box.append(head);
   for (const r of rows) {
     const row = el("div", "sub" + (r.unsubscribed ? " done" : ""));
+    row.tabIndex = 0;
+    row.title = "Show this sender's mail";
     const av = avatar(r.from_name, r.from_addr);
     if (state.accounts.length > 1) {
       const dot = el("span", "who-dot");
@@ -858,14 +862,24 @@ async function openSubscriptions() {
     }
     const who = el("div", "who");
     who.append(el("div", "name", r.from_name || r.from_addr), el("div", "addr", r.from_addr));
-    const cells = [el("span", "num", n(r.recent)), el("span", "num", n(r.total)), el("span", "num", n(r.in_inbox))];
-    const does = [el("span"), el("span"), el("span")];
+    const inbox = el("span", "num", n(r.in_inbox));
     const m = { id: r.id, account_id: r.account_id, from_name: r.from_name, from_addr: r.from_addr, unsubscribed: r.unsubscribed, facts: { unsubscribe: r.unsubscribe } };
-    const leave = unsubscribeButton(m);
-    if (leave) { leave.addEventListener("click", () => row.classList.add("done")); does[0].append(leave); }
-    const look = el("button", "", "Show mail");
-    look.title = "List everything from this sender";
-    look.onclick = () => {
+    const clear = el("span", "clear"), leave = el("span", "leave");
+    if (r.in_inbox) {
+      const b = el("button", "quiet");
+      b.append(icon("archive"));
+      b.title = `Archive the ${n(r.in_inbox)} in the inbox from this sender`;
+      b.onclick = async e => {
+        e.stopPropagation();
+        if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // said no, or nothing was there
+        b.remove();
+        inbox.textContent = "";
+      };
+      clear.append(b);
+    }
+    const unsub = unsubscribeButton(m);
+    if (unsub) { unsub.addEventListener("click", () => row.classList.add("done")); leave.append(unsub); }
+    const show = () => {
       dialog.close();
       leaveCollection();
       state.all = true; state.unreadOnly = false; state.kind = ""; state.filter = r.account_id;
@@ -873,18 +887,9 @@ async function openSubscriptions() {
       state.cursor = 0; state.selected.clear();
       showListFilters(); renderAccounts(); hideView(); loadThreads(true);
     };
-    does[1].append(look);
-    if (r.in_inbox) {
-      const clear = el("button", "", "Archive all");
-      clear.title = "Archive everything in the inbox from this sender";
-      clear.onclick = async () => {
-        if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // said no, or nothing was there
-        clear.remove();
-        cells[2].textContent = "";
-      };
-      does[2].append(clear);
-    }
-    row.append(av, who, ...cells, ...does);
+    row.onclick = show;
+    row.onkeydown = e => { if (e.key === "Enter" && e.target === row) show(); };
+    row.append(av, who, el("span", "num", n(r.recent)), el("span", "num", n(r.total)), inbox, clear, leave);
     box.append(row);
   }
 }
