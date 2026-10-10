@@ -398,7 +398,6 @@ const MESSAGES = {
     "Back in the inbox.": "受信トレイに戻しました。",
     "{n} conversations back in the inbox.": "{n} 件のスレッドを受信トレイに戻しました。",
     "Couldn't undo: {why}": "元に戻せませんでした: {why}",
-    "Archive {n} conversations from {sender} ({address})?": "{sender} ({address}) からの {n} 件のスレッドをアーカイブしますか?",
     "Archived.": "アーカイブしました。",
     "Archived {n} conversations from {sender}.": "{sender} からの {n} 件のスレッドをアーカイブしました。",
     "{n} conversations selected. Esc to clear.": "{n} 件のスレッドを選択しました。Esc で解除。",

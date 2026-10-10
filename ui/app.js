@@ -1816,7 +1816,6 @@ function archive() {
 async function archiveAllFrom(m, from) {
   const rows = await api(`/api/message/${m.id}/same-source`).catch(e => (toast(txServer(e.message)), []));
   if (!rows.length) return false;
-  if (rows.length > 1 && !confirm(tx("Archive {n} conversations from {sender} ({address})?", { n: fmtNum(rows.length), sender: from, address: m.from_addr }))) return false;
   const wasOpen = rows.some(t => key(t) === state.open?.key);
   act("archive", rows);
   if (wasOpen) leaveConversation();
