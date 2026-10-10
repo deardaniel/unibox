@@ -315,6 +315,7 @@ function showListFilters() {
   const scope = $("#scope");
   scope.firstElementChild.textContent = state.all ? tx("All mail") : tx("Inbox");
   scope.setAttribute("aria-pressed", state.all);
+  scope.dataset.key = state.all ? "g i" : "g a";   // the key that switches to the other one
   scope.title = state.all ? tx("Looking in all mail, archived and sent too. Click for just the inbox (g then i)")
     : tx("Looking in the inbox. Click for all mail, archived and sent too (g then a)");
   const box = $("#tokens");
@@ -1533,6 +1534,7 @@ function updateThreadBar() {
   const move = $("#thread-bar [data-act=archive], #thread-bar [data-act=inbox]"), out = listed?.in_inbox === false;
   move.dataset.act = out ? "inbox" : "archive";
   move.textContent = out ? tx("Move to inbox") : tx("Archive");
+  move.dataset.key = out ? "" : "e";
   move.title = out ? tx("Put this conversation back in the inbox") : tx("Archive (e)");
   const starred = state.open?.messages.some(m => m.starred);
   $('#thread-bar [data-act="star"]').textContent = starred ? tx("★ Starred") : tx("Star");
@@ -1541,6 +1543,7 @@ function updateThreadBar() {
   const allOpen = nodes.every(n => !n.classList.contains("closed"));
   b.hidden = nodes.length < 2;
   b.textContent = allOpen ? tx("Collapse all") : tx("Expand all");
+  b.dataset.key = allOpen ? ":" : ";";
   b.title = allOpen ? tx("Close every message but the last (:)") : tx("Open every message in this conversation (;)");
 }
 

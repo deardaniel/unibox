@@ -13,8 +13,8 @@
   <div id="brand"><span class="logo" role="button" tabindex="0" title="Choose the language and the app's color">U</span><span class="label">Unibox</span></div>
   <nav id="accounts"></nav>
   <button id="add" class="acct" title="Add a Gmail account"><span class="plus">+</span><span class="label">Add account</span></button>
-  <button id="subs" class="acct" title="Subscriptions: every sender you can unsubscribe from (g then s)"><span class="plus"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 3.5h13v9h-13z"/><path d="M1.5 4l6.5 5 6.5-5"/></svg></span><span class="label">Subscriptions</span></button>
-  <button id="doctor" class="acct" title="Connection Doctor: what Unibox is connected to, and what it is doing (g then d)"><span class="plus"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 8.5h3l1.8-4.5 3 8 1.8-3.5H15"/></svg></span><span class="label">Connection Doctor</span></button>
+  <button id="subs" class="acct" title="Subscriptions: every sender you can unsubscribe from (g then s)"><span class="plus"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 3.5h13v9h-13z"/><path d="M1.5 4l6.5 5 6.5-5"/></svg></span><span class="label" data-key="g s">Subscriptions</span></button>
+  <button id="doctor" class="acct" title="Connection Doctor: what Unibox is connected to, and what it is doing (g then d)"><span class="plus"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 8.5h3l1.8-4.5 3 8 1.8-3.5H15"/></svg></span><span class="label" data-key="g d">Connection Doctor</span></button>
   <div id="status" class="label"></div>
   <div id="activity" class="label" hidden></div>
 </aside>
@@ -25,12 +25,12 @@
          are on as removable pieces, and takes them typed too: is:unread, from:people, from:name. -->
     <div id="query">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-      <button id="scope" aria-pressed="false"><span>Inbox</span><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+      <button id="scope" aria-pressed="false" data-key="g a"><span>Inbox</span><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
       <span id="tokens"></span>
       <input id="search" type="text" placeholder="Search  ( / )" autocomplete="off" spellcheck="false" aria-label="Search" aria-controls="suggest">
       <div id="suggest" role="listbox" aria-label="Suggestions" hidden></div>
     </div>
-    <button id="unread-only" class="toggle" aria-pressed="false" title="Only unread conversations (f, or type is:unread)">Unread</button>
+    <button id="unread-only" class="toggle" data-key="f" aria-pressed="false" title="Only unread conversations (f, or type is:unread)">Unread</button>
     <div id="kind" class="seg" role="group" aria-label="Who wrote it: one or neither">
       <button data-kind="people" class="toggle" aria-pressed="false" title="Only mail that a person wrote (Shift+F steps through, or type from:people)">People</button>
       <button data-kind="automated" class="toggle" aria-pressed="false" title="Only mail that systems sent: newsletters, receipts, notifications (Shift+F, or type from:automated)">Automated</button>
@@ -49,12 +49,12 @@
 
     <section id="pane">
       <div id="thread-bar">
-        <button data-act="archive" title="Archive (e)">Archive</button>
-        <button data-act="unread" title="Mark as unread (Shift+U)">Mark unread</button>
-        <button data-act="star" title="Star (s)">Star</button>
-        <button data-act="expand" title="Open every message in this conversation (;)">Expand all</button>
-        <button data-act="reply" title="Open this conversation in Gmail to reply (r)">Reply in Gmail</button>
-        <button data-act="window" title="Open this conversation in its own window (Shift+Enter, or Ctrl+click it in the list)">Open in window</button>
+        <button data-act="archive" data-key="e" title="Archive (e)">Archive</button>
+        <button data-act="unread" data-key="⇧U" title="Mark as unread (Shift+U)">Mark unread</button>
+        <button data-act="star" data-key="s" title="Star (s)">Star</button>
+        <button data-act="expand" data-key=";" title="Open every message in this conversation (;)">Expand all</button>
+        <button data-act="reply" data-key="r" title="Open this conversation in Gmail to reply (r)">Reply in Gmail</button>
+        <button data-act="window" data-key="⇧↵" title="Open this conversation in its own window (Shift+Enter, or Ctrl+click it in the list)">Open in window</button>
       </div>
       <!-- One .view per conversation; several are kept rendered so opening is instant. -->
       <div id="link-status" hidden></div>

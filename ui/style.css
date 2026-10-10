@@ -38,6 +38,10 @@ button:disabled { opacity: .5; cursor: default; }
 a { color: var(--accent); }
 kbd { font: 12px/1 ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
       border-radius: 4px; padding: 2px 5px; background: var(--panel); }
+/* the key that does the same thing, shown on the control itself */
+[data-key]:not([data-key=""])::after { content: attr(data-key); margin-left: 8px; padding: 1px 4px; border: 1px solid var(--line);
+  border-radius: 4px; font: 400 11px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted); white-space: nowrap; }
+[aria-pressed="true"][data-key]::after { color: inherit; border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 
 /* ---- sidebar: a rail that opens over the content on hover ---- */
 #side { position: fixed; inset: 0 auto 0 0; width: var(--rail); z-index: 5; overflow: hidden;
@@ -102,7 +106,8 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #query > svg { flex: none; color: var(--muted); }
 #scope { flex: none; display: flex; align-items: center; gap: 3px; height: 24px; padding: 0 5px 0 8px; border: 0; border-radius: 5px;
          background: var(--hover); font-weight: 600; font-size: 13px; white-space: nowrap; }
-#scope svg { color: var(--muted); }
+#scope svg { color: var(--muted); order: 2; }
+#scope::after { margin-left: 4px !important; }
 #scope:hover:where(:not(:disabled)) { background: var(--line); }
 #scope[aria-pressed="true"] { background: var(--tint); color: var(--accent); }
 #scope[aria-pressed="true"] svg { color: inherit; }

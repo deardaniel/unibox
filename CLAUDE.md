@@ -12,7 +12,8 @@ changing or removing one, go through this list:
   written in American English, with a `ja-JP` entry (and an `en-GB` one only where the
   spelling differs). Text the server sends to the page needs an entry or a pattern in
   `txServer()`. Remove entries for strings that are gone.
-- **Keyboard shortcuts**: the `?` dialog in `ui/index.html`, and the tooltip of the control.
+- **Keyboard shortcuts**: the `?` dialog in `ui/index.html`, the tooltip of the control, and the
+  key shown on the control itself (`data-key`; keep it in step when the label changes).
 - **The assistant and MCP tools** (`src/agent.rs`, `src/mcp.rs`): the `mail` view's columns
   in `Db::agent_query`, the tool descriptions and action list, and the instructions. If the
   list can filter or act on something, the tools should be able to as well. What the page
