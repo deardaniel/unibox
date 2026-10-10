@@ -1163,8 +1163,11 @@ function doctorRow(box, state, name, parts, count = "") {
   });
   const dot = el("span", "dot " + state);
   dot.title = { ok: tx("Working"), warn: tx("Working, with something to look at"), bad: tx("Not working"), busy: tx("Checking…"), off: tx("Not in use") }[state];
+  // the dot has a cell of its own, so it stays on the first line when the rest wraps
+  const cell = el("span", "on-caps");
+  cell.append(dot);
   const row = el("div", "dr");
-  row.append(dot, el("div", "name", name), said, el("div", "count", count));
+  row.append(cell, el("div", "name", name), said, el("div", "count", count));
   box.append(row);
   return said;
 }
@@ -1283,10 +1286,11 @@ function doctorLine(l) {
   if (l.outcome) what.append(el("span", "out", "  →  " + l.outcome));
   const who = { imap: l.who, model: l.who, mcp: l.who || "MCP", app: "Unibox" }[l.channel] || l.who;
   // whose it is, with the account's own colour beside it where it is an account's
-  const whose = el("span", "who"), dot = el("i");
+  const whose = el("span", "who"), cell = el("span", "on-caps"), dot = el("i");
   const acct = l.channel === "imap" && state.accounts.find(a => a.email === l.who);
   if (acct) dot.style.background = acct.color;
-  whose.append(dot, who);
+  cell.append(dot);
+  whose.append(cell, el("span", "name", who));
   row.append(el("span", "at", new Date(l.at).toLocaleTimeString(LOCALE, { hour12: false })), whose, what,
     el("span", "ms", l.ms == null ? "" : l.ms < 1000 ? l.ms + " ms" : secs(l.ms)));
   row.title = who;

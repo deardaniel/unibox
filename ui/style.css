@@ -179,7 +179,8 @@ kbd { font: var(--fs-caption)/1 var(--font); border: 1px solid var(--line); bord
 .acct.err .dot, .acct.err .n { outline: 2px solid var(--danger); outline-offset: 1px; }
 #add, #subs, #doctor { color: var(--muted); }
 #add { margin-top: 6px; }
-#add .lead { font-size: var(--fs-subtitle); line-height: 1; }
+/* a tool's icon, on the capitals of its label */
+.acct .lead.on-caps { display: block; text-align: center; --box: 13px; }
 /* what is said at the foot of the rail shows once it is open */
 #status, #activity { visibility: hidden; transition: visibility 0s; }
 #side:hover :is(#status, #activity), #side:has(:focus-visible) :is(#status, #activity) { visibility: visible; transition-delay: var(--t-rail); }
@@ -591,8 +592,9 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 /* Interface: two labelled checkboxes, each with a line saying what it reaches */
 #interface { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; margin-bottom: var(--s3); border-top: 1px solid var(--line); }
 #interface h3 { margin: 0; }
-dialog label.switch { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; margin: 0; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--ink); cursor: pointer; }
-dialog label.switch input { width: 18px; height: 18px; margin: 2.5px 0 0; padding: 0; accent-color: var(--accent); }
+dialog label.switch { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; align-items: start; margin: 0; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--ink); cursor: pointer; }
+.switch .on-caps { --box: 18px; }
+dialog label.switch input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--accent); }
 .switch b { display: block; font-weight: 600; }
 .switch small { display: block; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); }
 #colour-sample .token { max-width: none; padding-right: var(--s2); }
@@ -644,8 +646,9 @@ dialog label.switch input { width: 18px; height: 18px; margin: 2.5px 0 0; paddin
 /* a row: its dot, what it is, what there is to say, and on the right a figure worth lining up */
 .dr { display: grid; grid-template-columns: 9px minmax(90px, 170px) minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; }
 .dr .count { color: var(--muted); font-size: var(--fs-small); line-height: var(--lh-small); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-/* the dot sits on the first line of what it is about */
-.dr .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); align-self: start; margin-top: 6px; }
+/* the dot sits on the capitals of the first line of what it is about */
+.dr .on-caps { --box: 9px; }
+.dr .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .dr .dot.ok { background: var(--ok); }
 .dr .dot.warn { background: var(--warn); }
 .dr .dot.bad { background: var(--danger); }
@@ -689,7 +692,11 @@ dialog label.switch input { width: 18px; height: 18px; margin: 2.5px 0 0; paddin
 #doctor-log .at, #doctor-log .ms { color: var(--muted); }
 #doctor-log .ms { text-align: right; }
 #doctor-log .who { color: var(--ink); }
-#doctor-log .who i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; }
+#doctor-log .who { display: flex; gap: 6px; align-items: start; }
+#doctor-log .who .on-caps { flex: none; --box: 7px; --lh: var(--lh-mono); }
+#doctor-log .who i { width: 7px; height: 7px; border-radius: 50%; }
+#doctor-log .who .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#doctor-log .ln.wide .who .name { overflow: visible; overflow-wrap: anywhere; }
 #doctor-log .out { color: var(--muted); }
 #doctor-log .ln.bad .what, #doctor-log .ln.bad .out { color: var(--danger); }
 #doctor-log .ln.wide { white-space: normal; }
