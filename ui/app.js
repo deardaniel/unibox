@@ -841,7 +841,12 @@ async function openSubscriptions() {
   const rows = await api("/api/subscriptions?" + p).catch(e => (toast(e.message), []));
   box.textContent = "";
   if (!rows.length) box.append(el("div", "empty", "No senders with an unsubscribe link yet."));
-  const n = x => x.toLocaleString();
+  const n = x => x ? x.toLocaleString() : "";
+  // a table: who, how much they send, and one column per thing to do, so the buttons line up
+  const head = el("div", "sub head");
+  head.append(el("span"), el("span", "", "Sender"), el("span", "num", "Last 3 months"), el("span", "num", "In all"),
+    el("span", "num", "In inbox"), el("span"), el("span"), el("span"));
+  if (rows.length) box.append(head);
   for (const r of rows) {
     const row = el("div", "sub" + (r.unsubscribed ? " done" : ""));
     const av = avatar(r.from_name, r.from_addr);
@@ -852,13 +857,12 @@ async function openSubscriptions() {
       av.title = account(r.account_id)?.email || "";
     }
     const who = el("div", "who");
-    who.append(el("div", "name", r.from_name || r.from_addr), el("div", "addr", r.from_addr),
-      el("div", "n", (r.recent ? `${n(r.recent)} in the last 3 months` : "None in the last 3 months")
-        + ` · ${n(r.total)} in all` + (r.in_inbox ? ` · ${n(r.in_inbox)} in the inbox` : "")));
-    const does = el("div", "does");
+    who.append(el("div", "name", r.from_name || r.from_addr), el("div", "addr", r.from_addr));
+    const cells = [el("span", "num", n(r.recent)), el("span", "num", n(r.total)), el("span", "num", n(r.in_inbox))];
+    const does = [el("span"), el("span"), el("span")];
     const m = { id: r.id, account_id: r.account_id, from_name: r.from_name, from_addr: r.from_addr, unsubscribed: r.unsubscribed, facts: { unsubscribe: r.unsubscribe } };
     const leave = unsubscribeButton(m);
-    if (leave) { leave.addEventListener("click", () => row.classList.add("done")); does.append(leave); }
+    if (leave) { leave.addEventListener("click", () => row.classList.add("done")); does[0].append(leave); }
     const look = el("button", "", "Show mail");
     look.title = "List everything from this sender";
     look.onclick = () => {
@@ -869,14 +873,18 @@ async function openSubscriptions() {
       state.cursor = 0; state.selected.clear();
       showListFilters(); renderAccounts(); hideView(); loadThreads(true);
     };
-    does.append(look);
+    does[1].append(look);
     if (r.in_inbox) {
       const clear = el("button", "", "Archive all");
       clear.title = "Archive everything in the inbox from this sender";
-      clear.onclick = async () => { await archiveAllFrom(m, r.from_name || r.from_addr); clear.remove(); };
-      does.append(clear);
+      clear.onclick = async () => {
+        if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // said no, or nothing was there
+        clear.remove();
+        cells[2].textContent = "";
+      };
+      does[2].append(clear);
     }
-    row.append(av, who, does);
+    row.append(av, who, ...cells, ...does);
     box.append(row);
   }
 }
@@ -1428,12 +1436,13 @@ function archive() {
 /** Clear out everything in the inbox from one sender. One z brings it all back. */
 async function archiveAllFrom(m, from) {
   const rows = await api(`/api/message/${m.id}/same-source`).catch(e => (toast(e.message), []));
-  if (!rows.length) return;
-  if (rows.length > 1 && !confirm(`Archive ${rows.length} conversations from ${from} (${m.from_addr})?`)) return;
+  if (!rows.length) return false;
+  if (rows.length > 1 && !confirm(`Archive ${rows.length} conversations from ${from} (${m.from_addr})?`)) return false;
   const wasOpen = rows.some(t => key(t) === state.open?.key);
   act("archive", rows);
   if (wasOpen) leaveConversation();
   toast(rows.length > 1 ? `Archived ${rows.length} conversations from ${from}.` : "Archived.");
+  return true;
 }
 
 function markUnread() {

@@ -23,7 +23,7 @@ body { margin: 0; background: var(--bg); color: var(--ink);
        overflow: hidden; }
 button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
          border-radius: 6px; padding: 5px 11px; cursor: pointer; }
-button:hover { background: var(--hover); }
+button:hover:where(:not(:disabled)) { background: var(--hover); }
 button.quiet { background: none; border-color: transparent; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 @media (prefers-color-scheme: dark) { button.primary { color: #111; } }
@@ -304,19 +304,24 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
                white-space: nowrap; pointer-events: none; }
 #link-status.lie { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; }
 #trust-dialog { width: min(560px, 92vw); }
-#subs-dialog { width: min(760px, 94vw); }
+#subs-dialog { width: min(980px, 94vw); }
 #subs-list { max-height: min(62vh, 640px); overflow-y: auto; margin: 0 -6px 12px; }
 #subs-list .empty { padding: 24px; text-align: center; color: var(--muted); }
-.sub { display: flex; align-items: center; gap: 12px; padding: 8px 6px; border-radius: 8px; }
-.sub:hover { background: var(--hover); }
-.sub .av { flex: none; position: relative; }
-.sub .who { flex: 1; min-width: 0; }
+/* a table: avatar, sender, three counts, three things to do */
+.sub { display: grid; grid-template-columns: 28px minmax(0, 1fr) 96px 60px 68px 112px 96px 96px; align-items: center;
+  column-gap: 10px; padding: 7px 6px; border-radius: 8px; }
+.sub:not(.head):hover { background: var(--hover); }
+.sub.head { position: sticky; top: 0; z-index: 1; background: var(--panel); border-radius: 0; border-bottom: 1px solid var(--line);
+  color: var(--muted); font-size: 12px; padding-top: 2px; }
+.sub .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sub .av { position: relative; }
+.sub .who { min-width: 0; }
 .sub .who > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub .name { font-weight: 600; }
-.sub .addr, .sub .n { color: var(--muted); font-size: 12.5px; }
-.sub .does { display: flex; gap: 6px; flex: none; }
-.sub .does button { padding: 4px 10px; font-size: 13px; }
-.sub.done .who { opacity: .55; }
+.sub .addr { color: var(--muted); font-size: 12.5px; }
+.sub button { width: 100%; padding: 4px 0; font-size: 13px; white-space: nowrap; }
+.sub .unsub:disabled, .sub .unsub:disabled:hover { background: none; border-color: transparent; color: var(--muted); cursor: default; }
+.sub.done .who, .sub.done .num { opacity: .55; }
 #subs { color: var(--muted); }
 #subs .plus { width: 13px; display: grid; place-items: center; flex: none; }
 #trust-dialog .verdict { color: var(--ink); font-weight: 600; }
