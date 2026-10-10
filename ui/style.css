@@ -245,7 +245,7 @@ body.solo #unread-only, body.solo .seg, body.solo #kind { display: none; }
           radial-gradient(circle at 30px 26px, color-mix(in srgb, var(--muted) 22%, transparent) 15.5px, transparent 16.5px) 0 0 / 100% var(--row-h, 74px),
           linear-gradient(to bottom, transparent calc(var(--row-h, 74px) - 1px), var(--line) 0) 0 0 / 100% var(--row-h, 74px),
           var(--read-bg); }
-#rows .row-t { position: absolute; left: 0; right: 0; box-sizing: border-box; }
+#rows .row-t { position: absolute; left: 0; right: 0; box-sizing: border-box; height: var(--row-h); }
 /* how much the list holds: stays at the bottom of the pane, under however many rows there are */
 #list-foot { position: sticky; bottom: 0; z-index: 2; margin-top: auto; display: flex; gap: 10px; align-items: baseline;
              padding: 5px var(--s3); font-size: var(--fs-caption); color: var(--muted); background: var(--bg); border-top: 1px solid var(--line); white-space: nowrap; }

@@ -466,10 +466,12 @@ function renderList() {
   const box = el("div");
   box.id = "rows";
   list.append(box);
-  // every row is the same height; measure one rather than assume (it follows the font and zoom)
+  // Every row is the same height. One is measured before --row-h is set, so it is as tall as
+  // its content wants (that follows the font and zoom); rounded up to a whole pixel, that becomes
+  // the height every row is given, so none takes its height from its content.
   const probe = rowNode(0);
   box.append(probe);
-  rowHeight = probe.offsetHeight || rowHeight || 70;
+  rowHeight = Math.ceil(probe.getBoundingClientRect().height) || rowHeight || 70;
   probe.remove();
   box.style.height = state.threads.length * rowHeight + "px";
   box.style.setProperty("--row-h", rowHeight + "px");
