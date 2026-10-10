@@ -67,6 +67,7 @@ a deliberate off-grid padding) may stay literal: snapping them would move things
   /* type */
   --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
   --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --lh-caption: 16px; --lh-small: 18px; --lh-body: 20px; --lh-subtitle: 22px; --lh-title: 28px; --lh-mono: 18px;
   --fs-key: 11px; --fs-caption: 12px; --fs-small: 13px; --fs-body: 14px; --fs-subtitle: 16px; --fs-title: 20px; --fs-mono: 12.5px;
 
   /* space (4 px grid), shape, size */
@@ -129,6 +130,52 @@ theme, so a resize never flashes a different colour around the page. Change both
 | Small | 13 / 18 | 400 | Snippets, secondary lines, status details |
 | Caption | 12 / 16 | 400 | Counts, footnotes, column heads |
 | Mono | 12.5 / 18 | 400 | Tokens, typed queries, addresses in logs, the Doctor log |
+
+**Aligning a box to text.** Every line of text sets its line height from the token that
+pairs with its size, explicitly, so alignment can be computed: caption 12/`--lh-caption`,
+small 13/`--lh-small`, body 14/`--lh-body`, subtitle 16/`--lh-subtitle`, title
+20/`--lh-title`, mono 12.5/`--lh-mono`. Then there are three cases, and no margin measured
+from a screenshot in any of them.
+
+1. *A box no taller than the line* (checkbox, status dot, account dot, a 13–16 px icon)
+   beside the first line of its label: centred on that line's capitals, not on the line box.
+   Fonts draw their letters at different heights in the line (Segoe UI Variable about 1.5 px
+   low at 14/20), so let the font measure it, with the `.on-caps` utility:
+
+   ```css
+   /* the box's cell: a block (not flex, not grid), in the label's font and line height */
+   .on-caps { display: block; line-height: var(--lh, var(--lh-body)); }
+   .on-caps::before { content: "\200b"; }   /* gives the cell a baseline in that font */
+   .on-caps > * { display: inline-block; vertical-align: middle;          /* fallback */
+                  vertical-align: calc(0.5cap - var(--box) / 2); }
+   ```
+
+   The cell sets `--box` to the box's height, and `--lh` and `font` to match the label (the
+   Doctor log's dot cell uses `--mono` and `--lh-mono`, so the dot centres on Cascadia's
+   capitals). `cap` is the CSS unit for the font's cap height, read from the font itself;
+   WebView2 supports it. The `vertical-align` length raises the box's bottom edge from the
+   baseline, so the box's centre lands half a cap height above the baseline. The cell holds
+   only the box, beside the label in its own grid or flex column with `align-items: start`
+   (or `first baseline`, below), so when the label wraps, the box stays on the first line.
+
+   `cap` is measured from the first font in the stack, Segoe UI Variable, also for a
+   Japanese label set in Yu Gothic UI. Kana and kanji sit a little differently, so expect
+   up to about 1 px there; that is accepted. Never add a per-language nudge.
+
+2. *A box taller than the line beside a single line* (the Doctor's 28 px group tile beside
+   its heading): centred on that line box, with the offset computed from tokens:
+   `margin-block: calc((var(--lh-subtitle) - var(--box)) / 2)`.
+
+3. *A box beside a block of several lines* (the list row's 32 px avatar beside sender,
+   subject and snippet): top-aligned with the block, `align-self: start`, no offset.
+
+Columns of text that should share a line (the Doctor's group heading and its first row)
+align on their first baselines (`align-items: first baseline` on the grid), not with
+padding. A `.on-caps` cell has a baseline (its zero-width space), so it joins in.
+
+Things that contain text in the same font, such as key badges in a control, are centred by
+flex and need none of this. Check alignment in the installed window: a browser on another
+system uses another font.
 
 Numbers that line up use `font-variant-numeric: tabular-nums`. Japanese renders in Yu Gothic UI
 (Segoe has no Japanese glyphs); keep it in the stack so semibold Japanese matches the Latin text.
