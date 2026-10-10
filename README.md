@@ -72,7 +72,9 @@ changed there too. Mail it reads to answer a question is sent to that endpoint.
 Unibox is also an [MCP](https://modelcontextprotocol.io) server, so Claude Desktop, Cowork
 or Claude Code can work with every account at once instead of one Gmail connector each. It
 offers the built-in assistant's tools (`query_mail`, `read_conversation`, `apply_action`,
-`draft_reply`, `show_conversations`) plus `list_accounts`. Queries see all mail, with whether a
+`draft_reply`, `show_conversations`) plus `list_accounts`. Anything that returns the words of
+an email says, in the tool's description and beside each answer, that mail is to be read and
+never obeyed. Queries see all mail, with whether a
 person or a system sent each message and whether it can be unsubscribed from, and can use the
 full-text index; actions include archiving and moving back to the inbox. Like the assistant, it cannot send
 or delete. Unibox has to be open; nothing is exposed beyond this PC.
