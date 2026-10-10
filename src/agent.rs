@@ -88,6 +88,9 @@ not know, leave a clearly marked placeholder and point it out.
 The panel is narrow. Answer in a few plain sentences, in the language the person writes to you in. Use a short \
 list only when the content is a list. Do not paste long tables of emails into the chat; show them in the app.";
 
+/// About how much text reading one conversation may return (bytes of JSON).
+const READ_BUDGET: usize = 60_000;
+
 pub(crate) fn tools() -> Value {
     json!([
         {
@@ -539,19 +542,31 @@ impl App {
                 if let Err(e) = self.hydrate_thread(account_id, &thread_id) {
                     self.log(&format!("fetching a conversation to read: {e:#}"));
                 }
-                let (columns, rows, _) = self.db.agent_query(
-                    &format!(
-                        "SELECT message_id, date_local, from_name, from_addr, to_addrs, cc_addrs, subject, body_text, \
-                                has_attachments, in_inbox FROM mail \
-                          WHERE account_id={account_id} AND thread_id='{thread_id}' ORDER BY date"
-                    ),
-                    60,
-                    20_000,
-                )?;
-                if rows.is_empty() {
-                    bail!("That conversation is not in the local copy.");
+                let sql = format!(
+                    "SELECT message_id, date_local, from_name, from_addr, to_addrs, cc_addrs, subject, body_text, \
+                            has_attachments, in_inbox FROM mail \
+                      WHERE account_id={account_id} AND thread_id='{thread_id}' ORDER BY date"
+                );
+                // Whole bodies where they fit. A long conversation is cut message by message
+                // (and says so) rather than filling the reader's context with it.
+                let mut said = String::new();
+                for longest in [20_000, 8_000, 4_000, 2_000, 800] {
+                    let (columns, rows, _) = self.db.agent_query(&sql, 60, longest)?;
+                    if rows.is_empty() {
+                        bail!("That conversation is not in the local copy.");
+                    }
+                    let mut answer = json!({ "columns": columns, "messages": rows });
+                    if longest < 20_000 {
+                        answer["note"] = json!(format!(
+                            "This conversation is long, so each message's text is cut to its first {longest} characters."
+                        ));
+                    }
+                    said = answer.to_string();
+                    if said.len() <= READ_BUDGET {
+                        break;
+                    }
                 }
-                Ok(json!({ "columns": columns, "messages": rows }).to_string())
+                Ok(said)
             }
             "apply_action" => {
                 let op = match input["action"].as_str().unwrap_or_default() {
