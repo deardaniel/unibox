@@ -141,21 +141,22 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 /* ---- assistant ---- */
 #ask { display: grid; place-items: center; width: 34px; padding: 0; color: var(--accent); }
 #ask.on { background: var(--hover); }
-#unread-only { padding: 0 12px; }
-#unread-only.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-/* a choice of one among a few: buttons joined into a single control */
+/* The bar's switches all speak one way: filled means on, plain means off.
+   A choice of one (Inbox / All Mail) is a joined pair with the chosen side filled.
+   A switch that is on or off by itself (Unread only, People, Automated) is a button of its own,
+   filled and ticked while on. */
 .seg { display: flex; flex: none; }
-.seg button { padding: 0 11px; border-radius: 0; margin-left: -1px; white-space: nowrap; }
+.seg button { padding: 0 12px; border-radius: 0; margin-left: -1px; white-space: nowrap; }
 .seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
 .seg button:last-child { border-radius: 0 8px 8px 0; }
-/* the usual choice (the first) is marked quietly; anything else stands out, as a filter that is on */
-.seg button.on { background: var(--hover); font-weight: 600; }
-.seg button.on:not(:first-child) { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
-/* two switches, both on unless one kind of mail is being left out */
-#kind button { color: var(--muted); }
-#kind button.on { background: var(--hover); font-weight: 600; color: inherit; border-color: var(--line); }
-#kind.narrowed button.on { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
-body.solo #unread-only, body.solo .seg { display: none; }
+.seg button.on, .toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
+.seg button.on:hover, .toggle[aria-pressed="true"]:hover { background: var(--accent); filter: brightness(1.12); }
+#kind { display: flex; flex: none; gap: 8px; }
+.toggle { padding: 0 12px; white-space: nowrap; color: var(--muted); }
+.toggle::before { content: "✓"; display: inline-block; width: 0; opacity: 0; overflow: hidden; vertical-align: bottom;
+  transition: width .12s ease, opacity .12s ease; }
+.toggle[aria-pressed="true"]::before { width: 1.05em; opacity: 1; }
+body.solo #unread-only, body.solo .seg, body.solo #kind { display: none; }
 #assistant { flex: none; width: 380px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
 #assistant[hidden] { display: none; }
 #assistant > header { display: flex; align-items: center; gap: 2px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--line); height: 51px; }

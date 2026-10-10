@@ -25,10 +25,10 @@
       <button data-all="" title="Only what is in the inbox (g then i)">Inbox</button>
       <button data-all="1" title="Everything: archived and sent mail too (g then a)">All Mail</button>
     </div>
-    <button id="unread-only" aria-pressed="false" title="Show only unread conversations (f)">Unread</button>
-    <div id="kind" class="seg" role="group" aria-label="Who wrote it">
-      <button data-kind="people" aria-pressed="true" title="Mail that a person wrote. Turn off to see only what systems sent (Shift+F steps through)">People</button>
-      <button data-kind="automated" aria-pressed="true" title="Mail that systems sent: newsletters, receipts, notifications. Turn off to see only what people wrote (Shift+F)">Automated</button>
+    <button id="unread-only" class="toggle" aria-pressed="false" title="Show only unread conversations (f)">Unread only</button>
+    <div id="kind" role="group" aria-label="Who wrote it">
+      <button data-kind="people" class="toggle" aria-pressed="true" title="Mail that a person wrote. Turn off to see only what systems sent (Shift+F steps through)">People</button>
+      <button data-kind="automated" class="toggle" aria-pressed="true" title="Mail that systems sent: newsletters, receipts, notifications. Turn off to see only what people wrote (Shift+F)">Automated</button>
     </div>
     <button id="sync" aria-label="Sync"><svg class="spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
@@ -107,7 +107,7 @@
 
 <dialog id="subs-dialog">
   <h2>Subscriptions</h2>
-  <p id="subs-note">Senders you can unsubscribe from, busiest first. Click one to see its mail. After unsubscribing it can take a few days for mail to stop.</p>
+  <p id="subs-note">Senders you can unsubscribe from, busiest first. After unsubscribing it can take a few days for mail to stop.</p>
   <div id="subs-list"></div>
   <div class="row"><button id="subs-close">Close</button></div>
 </dialog>

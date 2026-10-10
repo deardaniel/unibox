@@ -314,7 +314,6 @@ function showListFilters() {
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on);
   }
-  $("#kind").classList.toggle("narrowed", !!state.kind);
   $("#search").placeholder = state.all ? "Search all mail  ( / )" : "Search the inbox  ( / )";
 }
 function setListFilter(name, on) {
