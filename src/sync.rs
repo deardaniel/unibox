@@ -198,6 +198,9 @@ impl App {
         *self.wake.lock().unwrap() = Some(tx);
         let app = self.clone();
         std::thread::spawn(move || {
+            if let Err(e) = app.db.build_search() {
+                app.log(&format!("building the search index: {e:#}"));
+            }
             app.refresh_summaries();
             // which accounts this pass covers; None means all of them
             let mut only: Option<Vec<i64>> = None;

@@ -99,7 +99,8 @@ Use this to find, count and inspect mail. There is one table to query, `mail`, w
 - thread_id TEXT: the conversation it belongs to (a long number stored as text; compare with quotes).\n\
 - date INTEGER: when it arrived, Unix seconds. date_local TEXT: the same as 'YYYY-MM-DD HH:MM:SS' in local time; use it for date ranges, e.g. date_local >= '2026-01-01'.\n\
 - from_name, from_addr, to_addrs, cc_addrs, subject TEXT.\n\
-- snippet TEXT: the first couple of hundred characters of the body. body_text TEXT: the body as plain text, up to about 20,000 characters.\n\
+- snippet TEXT: the first couple of hundred characters of the body. body_text TEXT: the body as plain text, up to about 20,000 characters. \
+Both are empty for archived mail that has not been opened in the app yet: only its headers are held, so find that by subject, sender or date.\n\
 - in_inbox INTEGER: 1 if it is in the inbox now, 0 if archived. unread, starred, has_attachments INTEGER 0/1. size INTEGER bytes.\n\
 LIKE is case-insensitive for ASCII letters. At most 200 rows come back and long text is shortened, so select only the columns you need, \
 use COUNT and GROUP BY to get an overview first (for example sender domains: substr(from_addr, instr(from_addr,'@')+1)), and add LIMIT. \

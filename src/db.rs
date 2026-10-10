@@ -22,6 +22,20 @@ pub struct Account {
     pub indexing: bool,
 }
 
+/// Bump to have the search index rebuilt from scratch on the next start.
+const SEARCH_INDEX: &str = "1";
+
+/// How to look `query` up in the search index: every word must appear in the message, as a
+/// word or as part of one. `None` if the index cannot answer it, which is when a word is
+/// shorter than the three characters it is built from.
+fn search_terms(query: &str) -> Option<String> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+    if words.is_empty() || words.iter().any(|w| w.chars().count() < 3) {
+        return None;
+    }
+    Some(words.iter().map(|w| format!("\"{}\"", w.replace('"', "\"\""))).collect::<Vec<_>>().join(" "))
+}
+
 /// The part of an account's All Mail folder that is listed locally: every message with a
 /// UID from `low` to `high`. `low` works its way down to 1. `swept` is when read/star marks
 /// and deletions were last checked across the whole of it.
@@ -188,6 +202,29 @@ impl Db {
             c.execute("ALTER TABLE messages ADD COLUMN all_uid INTEGER", [])?;
         }
         c.execute("CREATE INDEX IF NOT EXISTS messages_all ON messages(account_id, all_uid)", [])?;
+        // The search index: every run of three characters in the subject, sender and text of
+        // each message, so a word or part of one is found without reading all the mail. It
+        // holds no text of its own (it refers back to `messages`) and is kept in step by the
+        // triggers. `build_search` fills it the first time.
+        c.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
+               subject, from_name, from_addr, body_text,
+               content='messages', content_rowid='id', tokenize='trigram');
+             CREATE TRIGGER IF NOT EXISTS search_insert AFTER INSERT ON messages BEGIN
+               INSERT INTO search(rowid, subject, from_name, from_addr, body_text)
+               VALUES(new.id, new.subject, new.from_name, new.from_addr, new.body_text);
+             END;
+             CREATE TRIGGER IF NOT EXISTS search_delete AFTER DELETE ON messages BEGIN
+               INSERT INTO search(search, rowid, subject, from_name, from_addr, body_text)
+               VALUES('delete', old.id, old.subject, old.from_name, old.from_addr, old.body_text);
+             END;
+             CREATE TRIGGER IF NOT EXISTS search_update AFTER UPDATE OF subject, from_name, from_addr, body_text ON messages BEGIN
+               INSERT INTO search(search, rowid, subject, from_name, from_addr, body_text)
+               VALUES('delete', old.id, old.subject, old.from_name, old.from_addr, old.body_text);
+               INSERT INTO search(rowid, subject, from_name, from_addr, body_text)
+               VALUES(new.id, new.subject, new.from_name, new.from_addr, new.body_text);
+             END;",
+        )?;
         Ok(db)
     }
 
@@ -320,30 +357,47 @@ impl Db {
         all_mail: bool,
     ) -> Result<Vec<ThreadRow>> {
         let c = self.conn()?;
-        let like = format!("%{}%", query.replace('%', "").replace('_', " "));
+        // ?2 is what to look for: words for the search index when it can answer, otherwise a
+        // pattern that every message is read against.
+        let indexed = search_terms(query).filter(|_| self.meta("search_index").ok().flatten().as_deref() == Some(SEARCH_INDEX));
+        let (wanted, matching) = match indexed {
+            Some(terms) => (
+                terms,
+                "(m.account_id, m.gm_thrid) IN (SELECT x.account_id, x.gm_thrid FROM search JOIN messages x ON x.id=search.rowid
+                                                 WHERE search MATCH ?2)",
+            ),
+            None => (
+                format!("%{}%", query.replace('%', "").replace('_', " ")),
+                "(?2='%%' OR EXISTS (SELECT 1 FROM messages s
+                       WHERE s.account_id=m.account_id AND s.gm_thrid=m.gm_thrid
+                         AND (s.subject LIKE ?2 OR s.from_name LIKE ?2 OR s.from_addr LIKE ?2 OR s.body_text LIKE ?2)))",
+            ),
+        };
         // SQLite fills the bare columns from the row that supplied MAX(date): the newest message.
-        let mut st = c.prepare(
+        let mut st = c.prepare(&format!(
             "SELECT account_id, gm_thrid, MAX(date) AS newest, subject, snippet,
-                    (SELECT GROUP_CONCAT(n, ', ') FROM (
+                    -- (All Mail groups whole conversations, so there the group itself answers
+                    -- these two for the many conversations of one message)
+                    CASE WHEN ?6=1 AND COUNT(*)=1 THEN CASE WHEN from_name='' THEN from_addr ELSE from_name END
+                    ELSE (SELECT GROUP_CONCAT(n, ', ') FROM (
                         SELECT CASE WHEN t.from_name='' THEN t.from_addr ELSE t.from_name END AS n
                           FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid
-                         GROUP BY n ORDER BY MIN(t.date))),
-                    (SELECT COUNT(*) FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid),
+                         GROUP BY n ORDER BY MIN(t.date))) END,
+                    CASE WHEN ?6=1 THEN COUNT(*)
+                    ELSE (SELECT COUNT(*) FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid) END,
                     SUM(seen=0), SUM(starred)>0, SUM(has_attach)>0, from_name, from_addr,
                     SUM(automated=0)>0, SUM(in_inbox)>0
                FROM messages m
               WHERE (?6=1 OR in_inbox=1)
                 AND (?1 IS NULL OR account_id=?1)
-                AND (?2='%%' OR EXISTS (SELECT 1 FROM messages s
-                       WHERE s.account_id=m.account_id AND s.gm_thrid=m.gm_thrid
-                         AND (s.subject LIKE ?2 OR s.from_name LIKE ?2 OR s.from_addr LIKE ?2 OR s.body_text LIKE ?2)))
+                AND {matching}
               GROUP BY account_id, gm_thrid
              HAVING (?3=0 OR SUM(seen=0)>0
                      OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?4)))
                 AND (?5=0 OR SUM(COALESCE(automated, 0)=0)>0)
-              ORDER BY newest DESC",
-        )?;
-        let rows = st.query_map(params![account, like, unread_only, keep, people_only, all_mail], |r| {
+              ORDER BY newest DESC"
+        ))?;
+        let rows = st.query_map(params![account, wanted, unread_only, keep, people_only, all_mail], |r| {
             Ok(ThreadRow {
                 account_id: r.get(0)?,
                 thrid: r.get(1)?,
@@ -362,6 +416,17 @@ impl Db {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    // ---- search ----------------------------------------------------------
+    /// Fill the search index from the mail already held, once. Until it is done, searching
+    /// reads through everything instead (slower, same answers).
+    pub fn build_search(&self) -> Result<()> {
+        if self.meta("search_index")?.as_deref() == Some(SEARCH_INDEX) {
+            return Ok(());
+        }
+        self.conn()?.execute("INSERT INTO search(search) VALUES('rebuild')", [])?;
+        self.set_meta("search_index", SEARCH_INDEX)
     }
 
     // ---- All Mail --------------------------------------------------------
@@ -690,5 +755,58 @@ impl Db {
         }
         out.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_words_go_to_the_index_unless_one_is_too_short() {
+        assert_eq!(search_terms("stripe receipt").as_deref(), Some("\"stripe\" \"receipt\""));
+        assert_eq!(search_terms("say \"hi there\"").as_deref(), Some("\"say\" \"\"\"hi\" \"there\"\"\""));
+        assert_eq!(search_terms("予約確認").as_deref(), Some("\"予約確認\""));
+        assert_eq!(search_terms("to do"), None);
+        assert_eq!(search_terms("予約"), None);
+        assert_eq!(search_terms("  "), None);
+    }
+
+    #[test]
+    fn search_finds_parts_of_words_and_follows_changes() {
+        let dir = std::env::temp_dir().join(format!("unibox-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("search.db");
+        let _ = std::fs::remove_file(&path);
+        let db = Db::open(&path).unwrap();
+        let id = db.add_account("a@example.com").unwrap();
+        let c = db.conn().unwrap();
+        let add = |msgid: &str, thrid: &str, subject: &str, inbox: bool| {
+            let m = NewMessage {
+                gm_msgid: msgid, gm_thrid: thrid, uid: None, in_inbox: inbox, seen: true, starred: false, date: 1, size: 0,
+                from_name: "Castle Hire", from_addr: "receipts@pay.example", to_addrs: "", cc_addrs: "", subject,
+            };
+            Db::insert_message(&c, id, &m).unwrap();
+        };
+        add("1", "1", "Your receipt for the bouncy castle", true);
+        add("2", "2", "Minutes of the meeting", false);
+        let found = |q: &str, all: bool| db.threads(None, q, false, false, "[]", all).unwrap().len();
+        // before the index is built, and after: the same answers
+        for built in [false, true] {
+            if built {
+                db.build_search().unwrap();
+            }
+            assert_eq!(found("ouncy cast", false), 1, "built: {built}");
+            assert_eq!(found("RECEIPT castle", false), built as usize, "words in any order need the index");
+            assert_eq!(found("minutes", false), 0);
+            assert_eq!(found("minutes", true), 1);
+            assert_eq!(found("pay.example", true), 2);
+            assert_eq!(found("", true), 2);
+        }
+        c.execute("UPDATE messages SET body_text='the deposit was refunded' WHERE gm_msgid='2'", []).unwrap();
+        assert_eq!(found("deposit refunded", true), 1);
+        c.execute("DELETE FROM messages WHERE gm_msgid='2'", []).unwrap();
+        assert_eq!(found("deposit", true), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

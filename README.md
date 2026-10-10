@@ -7,7 +7,9 @@ triage: replying opens the conversation in Gmail.
 
 **The inbox**
 
-- One threaded list across every account, or one account at a time, with search.
+- One threaded list across every account, or one account at a time.
+- Search finds every word you type, whole or in part, in subjects, senders and message
+  text, from a full-text index.
 - The whole list is there at once (no "load more"), with a count of conversations and
   unread beneath it.
 - All Mail (`g` `a`) lists everything, archived and sent mail too; `g` `i` goes back to the
