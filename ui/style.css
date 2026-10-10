@@ -311,6 +311,10 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 .row-t .text { grid-area: text; min-width: 0; }
 .row-t .who, .row-t .subj, .row-t .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-t .subj, .row-t .snip { display: block; }
+/* each line keeps its place: a conversation with no preview leaves that line empty */
+.row-t .who, .row-t .subj, .row-t .snip { min-height: 1lh; }
+.row-t { align-content: start; }
+.row-t .text { align-self: start; }
 .row-t .who .c { color: var(--muted); font-weight: 400; font-size: var(--fs-caption); margin-left: var(--s1); }
 .row-t .who .person { color: var(--accent); opacity: .8; margin-right: 5px; }
 .row-t .who .person svg { width: 11px; height: 11px; vertical-align: -1px; }
