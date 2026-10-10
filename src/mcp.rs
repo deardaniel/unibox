@@ -6,6 +6,7 @@
 //! server themselves and talk to it over stdin/stdout run `unibox --mcp`, which passes each
 //! message on to the running app.
 
+use crate::doctor;
 use crate::sync::App;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -147,12 +148,39 @@ impl App {
             }
             done.map_err(|e| format!("{e:#}"))
         };
+        // each message goes in the connection doctor's record: what was asked, how it went
+        let noted = |m: &Value| -> Option<Value> {
+            let began = std::time::Instant::now();
+            let method = m["method"].as_str().unwrap_or("?");
+            if method == "initialize" {
+                let info = &m["params"]["clientInfo"];
+                let name = [info["name"].as_str().unwrap_or("an assistant"), info["version"].as_str().unwrap_or("")].join(" ");
+                doctor::mcp_client(name.trim());
+            }
+            let who = doctor::mcp_request();
+            let what = match m["params"]["name"].as_str() {
+                Some(tool) if method == "tools/call" => format!("tools/call {tool}"),
+                _ => method.to_string(),
+            };
+            let reply = answer(m, &call);
+            let (outcome, ok) = match &reply {
+                None => ("noted".to_string(), true),
+                Some(r) if !r["error"].is_null() => (r["error"]["message"].as_str().unwrap_or("error").to_string(), false),
+                Some(r) => {
+                    let failed = r["result"]["isError"] == true;
+                    let said = if failed { r["result"]["content"][0]["text"].as_str().unwrap_or("failed").to_string() } else { "answered".into() };
+                    (format!("{said} · {}", doctor::size(r.to_string().len() as u64)), !failed)
+                }
+            };
+            doctor::note("mcp", &who, &what, &outcome, ok, Some(began.elapsed()));
+            reply
+        };
         match body {
             Value::Array(batch) => {
-                let answers: Vec<Value> = batch.iter().filter_map(|m| answer(m, &call)).collect();
+                let answers: Vec<Value> = batch.iter().filter_map(noted).collect();
                 (!answers.is_empty()).then_some(Value::Array(answers))
             }
-            one => answer(one, &call),
+            one => noted(one),
         }
     }
 }

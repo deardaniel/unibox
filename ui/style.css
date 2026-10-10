@@ -384,6 +384,38 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .sub.done .who, .sub.done .num { opacity: .55; }
 #subs { color: var(--muted); }
 #subs .plus { width: 13px; display: grid; place-items: center; flex: none; }
+#doctor-dialog { width: min(980px, 95vw); }
+#doctor-rows { display: grid; grid-template-columns: 14px minmax(140px, max-content) 1fr; gap: 9px 12px; align-items: baseline; margin-bottom: 16px; }
+#doctor-rows .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); align-self: center; }
+#doctor-rows .dot.ok { background: var(--ok); }
+#doctor-rows .dot.warn { background: var(--warn); }
+#doctor-rows .dot.bad { background: var(--danger); }
+#doctor-rows .dot.off { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
+#doctor-rows .dot.busy { background: var(--accent); animation: doctor-pulse 1s ease-in-out infinite; }
+@keyframes doctor-pulse { 50% { opacity: .25; } }
+#doctor-rows .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+#doctor-rows .said { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+#doctor-rows .said b { color: var(--ink); font-weight: 500; }
+#doctor-rows .said .bad { color: var(--danger); }
+#doctor-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+#doctor-bar h3 { margin: 0 auto 0 0; font-size: 14px; }
+#doctor-bar .toggle { height: 28px; padding: 0 10px; font-size: 12.5px; }
+#doctor-problems-row { display: flex; align-items: center; gap: 6px; margin: 0; }
+#doctor-problems-row input { width: auto; margin: 0; }
+#doctor-log { height: min(42vh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  padding: 6px 0; font: 12px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+#doctor-log .ln { display: grid; grid-template-columns: 62px 150px 1fr 62px; gap: 0 10px; padding: 0 10px; white-space: nowrap; }
+#doctor-log .ln:hover { background: var(--hover); }
+#doctor-log .ln > * { overflow: hidden; text-overflow: ellipsis; }
+#doctor-log .at, #doctor-log .ms { color: var(--muted); }
+#doctor-log .ms { text-align: right; }
+#doctor-log .who { color: var(--accent); }
+#doctor-log .out { color: var(--muted); }
+#doctor-log .ln.bad .what, #doctor-log .ln.bad .out { color: var(--danger); }
+#doctor-log .ln.wide { white-space: normal; }
+#doctor-log .ln.wide > * { overflow: visible; overflow-wrap: anywhere; }
+#doctor-log .empty { padding: 24px; text-align: center; color: var(--muted); font: 13px/1.5 inherit; font-family: inherit; }
+#doctor-note { font-size: 12.5px; margin: 8px 0 10px; }
 #trust-dialog .verdict { color: var(--ink); font-weight: 600; }
 #trust-dialog .verdict.verified { color: var(--ok); }
 #trust-dialog .verdict.unverified { color: var(--warn); }

@@ -4,6 +4,7 @@
 //! reason this is hand-rolled: responses are parsed into a generic value tree
 //! so unknown attributes never break a FETCH.
 
+use crate::doctor;
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -178,6 +179,9 @@ pub struct Imap {
     /// A second handle on the socket, for changing its read timeout while idling.
     tcp: TcpStream,
     tag: u32,
+    /// Whose mailbox this is, and how much has been read from it, for the connection doctor.
+    who: String,
+    read: u64,
 }
 
 /// How long a command may wait for the server.
@@ -187,6 +191,17 @@ impl Imap {
     /// Connect and log in. `server` is `host:port`; a `plain:` prefix skips TLS
     /// (only used against the local test server).
     pub fn connect(server: &str, user: &str, password: &str) -> Result<Imap> {
+        let began = std::time::Instant::now();
+        let made = Imap::connect_inner(server, user, password);
+        let outcome = match &made {
+            Ok(_) => "signed in".to_string(),
+            Err(e) => format!("{e:#}"),
+        };
+        doctor::note("imap", user, &format!("Connect to {}", server.trim_start_matches("plain:")), &outcome, made.is_ok(), Some(began.elapsed()));
+        made
+    }
+
+    fn connect_inner(server: &str, user: &str, password: &str) -> Result<Imap> {
         let (plain, addr) = match server.strip_prefix("plain:") {
             Some(a) => (true, a),
             None => (false, server),
@@ -208,9 +223,9 @@ impl Imap {
             let conn = rustls::ClientConnection::new(Arc::new(config), name)?;
             Box::new(rustls::StreamOwned::new(conn, tcp))
         };
-        let mut imap = Imap { io: BufReader::new(stream), tcp: handle, tag: 0 };
+        let mut imap = Imap { io: BufReader::new(stream), tcp: handle, tag: 0, who: user.to_string(), read: 0 };
         imap.read_response()?; // greeting
-        imap.run(&format!("LOGIN {} {}", quote(user), quote(password)))
+        imap.run_inner(&format!("LOGIN {} {}", quote(user), quote(password)))
             .map_err(|e| anyhow!("login failed: {e}"))?;
         Ok(imap)
     }
@@ -222,6 +237,7 @@ impl Imap {
             if self.io.read_until(b'\n', &mut line)? == 0 {
                 bail!("connection closed by server");
             }
+            self.read += line.len() as u64;
             while matches!(line.last(), Some(b'\n' | b'\r')) {
                 line.pop();
             }
@@ -236,6 +252,7 @@ impl Imap {
                     pieces.push(Piece::Text(line));
                     let mut buf = vec![0u8; n];
                     self.io.read_exact(&mut buf)?;
+                    self.read += n as u64;
                     pieces.push(Piece::Lit(buf));
                 }
                 None => {
@@ -248,6 +265,17 @@ impl Imap {
 
     /// Send one command and collect its untagged responses.
     pub fn run(&mut self, cmd: &str) -> Result<Vec<Vec<Val>>> {
+        let (began, read) = (std::time::Instant::now(), self.read);
+        let done = self.run_inner(cmd);
+        let outcome = match &done {
+            Ok(lines) => format!("OK · {} · {}", if lines.len() == 1 { "1 line".to_string() } else { format!("{} lines", lines.len()) }, doctor::size(self.read - read)),
+            Err(e) => format!("{e:#}"),
+        };
+        doctor::note("imap", &self.who, cmd, &outcome, done.is_ok(), Some(began.elapsed()));
+        done
+    }
+
+    fn run_inner(&mut self, cmd: &str) -> Result<Vec<Vec<Val>>> {
         self.tag += 1;
         let tag = format!("U{}", self.tag);
         let w = self.io.get_mut();
@@ -307,6 +335,15 @@ impl Imap {
 
     /// Store a complete message in a mailbox (already quoted), with the given flags.
     pub fn append(&mut self, mailbox: &str, flags: &str, message: &[u8]) -> Result<()> {
+        let began = std::time::Instant::now();
+        let done = self.append_inner(mailbox, flags, message);
+        let outcome = done.as_ref().map(|_| "OK".to_string()).unwrap_or_else(|e| format!("{e:#}"));
+        let what = format!("APPEND {mailbox} ({flags}) · {}", doctor::size(message.len() as u64));
+        doctor::note("imap", &self.who, &what, &outcome, done.is_ok(), Some(began.elapsed()));
+        done
+    }
+
+    fn append_inner(&mut self, mailbox: &str, flags: &str, message: &[u8]) -> Result<()> {
         self.tag += 1;
         let tag = format!("U{}", self.tag);
         let w = self.io.get_mut();
@@ -370,6 +407,18 @@ impl Imap {
     /// anything changed. The connection is back in its normal state afterwards.
     /// `started` is called once the server has agreed to idle.
     pub fn idle(&mut self, wait: Duration, started: impl FnOnce()) -> Result<bool> {
+        let began = std::time::Instant::now();
+        let done = self.idle_inner(wait, started);
+        let outcome = match &done {
+            Ok(true) => "Gmail reported a change".to_string(),
+            Ok(false) => "nothing new".to_string(),
+            Err(e) => format!("{e:#}"),
+        };
+        doctor::note("imap", &self.who, "IDLE (waiting for Gmail to report a change)", &outcome, done.is_ok(), Some(began.elapsed()));
+        done
+    }
+
+    fn idle_inner(&mut self, wait: Duration, started: impl FnOnce()) -> Result<bool> {
         self.tag += 1;
         let tag = format!("U{}", self.tag);
         let w = self.io.get_mut();

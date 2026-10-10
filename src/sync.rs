@@ -141,6 +141,11 @@ impl App {
         }
     }
 
+    /// Which accounts have a live IDLE connection right now.
+    pub(crate) fn watching(&self) -> HashMap<i64, bool> {
+        self.watchers.lock().unwrap().clone()
+    }
+
     /// True when every account has a live IDLE connection.
     fn all_watched(&self) -> bool {
         let w = self.watchers.lock().unwrap();
@@ -938,6 +943,7 @@ impl App {
     pub fn log(&self, line: &str) {
         use std::io::Write;
         eprintln!("{line}");
+        crate::doctor::note("app", "", line, "", !line.contains("fail") && !line.contains("stopped"), None);
         let path = self.dir.join("unibox.log");
         if std::fs::metadata(&path).map(|m| m.len() > 1_000_000).unwrap_or(false) {
             let _ = std::fs::remove_file(&path);

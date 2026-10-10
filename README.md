@@ -46,6 +46,14 @@ triage: replying opens the conversation in Gmail.
 - Subscriptions (`g` `s`, or the envelope in the sidebar): every sender you can unsubscribe
   from, busiest first, with buttons to unsubscribe, list its mail, or clear it from the inbox.
 
+**Seeing what it is doing**
+
+- Connection Doctor (`g` `d`, or the pulse line in the sidebar): whether each account signs
+  in and is being watched live, whether the assistant's model answers, which other assistant
+  last connected over MCP, and a running record of every command sent to Gmail, every request
+  to the model and every MCP call, with sizes and timings. It tries each connection afresh
+  when opened. The record holds no mail and is gone when the app closes.
+
 **Privacy**
 
 - Message HTML is sanitised and shown in a sandboxed frame; scripts never run.
@@ -181,6 +189,7 @@ Open `http://127.0.0.1:47921/` and add any address with any password (`wrong` is
 | `src/db.rs` | SQLite schema and queries |
 | `src/secrets.rs` | Passwords and keys in the Windows Credential Manager |
 | `src/agent.rs` | The assistant: model loop, tools, draft building |
+| `src/doctor.rs` | The connection doctor: the activity record and the checks |
 | `src/mcp.rs` | The same tools for other assistants, over MCP |
 | `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary); `i18n.js` holds the translations |
 | `tests/` | The pretend Gmail and Claude servers |

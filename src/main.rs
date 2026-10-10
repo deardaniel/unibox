@@ -3,6 +3,7 @@
 
 mod agent;
 mod db;
+mod doctor;
 mod imap;
 mod mcp;
 mod mime;
@@ -642,6 +643,22 @@ async fn mcp_message(State(app): State<Arc<App>>, Json(body): Json<serde_json::V
     })
 }
 
+#[derive(Deserialize)]
+struct DoctorQuery {
+    #[serde(default)]
+    after: u64,
+}
+
+/// The connection doctor: how each connection is doing, and the activity since `after`.
+async fn doctor_view(State(app): State<Arc<App>>, Query(q): Query<DoctorQuery>) -> Api<Json<serde_json::Value>> {
+    Ok(Json(blocking(move || app.doctor(q.after)).await?))
+}
+
+async fn doctor_check(State(app): State<Arc<App>>) -> StatusCode {
+    app.doctor_check();
+    StatusCode::NO_CONTENT
+}
+
 fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(index))
@@ -670,6 +687,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/agent/stop", post(agent_stop))
         .route("/api/agent/config", post(agent_configure))
         .route("/api/agent/collection/clear", post(agent_clear_collection))
+        .route("/api/doctor", get(doctor_view).post(doctor_check))
         .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/message/:id/attachment/:index/preview", get(attachment_preview))

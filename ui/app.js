@@ -1021,6 +1021,131 @@ async function openSubscriptions() {
     box.append(row);
   }
 }
+// ---- connection doctor -----------------------------------------------------------
+/** What the app is connected to and how each connection is doing, with a running record of
+ *  what it says to Gmail, to the assistant's model and to other assistants. */
+const doctor = { after: 0, lines: [], show: "", problems: false, timer: 0, seen: null };
+const ago = ms => {
+  const s = Math.round((Date.now() - ms) / 1000), f = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
+  return s < 45 ? tx("just now") : s < 3600 ? f.format(-Math.round(s / 60), "minute") : s < 86400 ? f.format(-Math.round(s / 3600), "hour") : f.format(-Math.round(s / 86400), "day");
+};
+const secs = ms => (ms / 1000).toLocaleString(LOCALE, { maximumFractionDigits: ms < 10000 ? 2 : 0 }) + " s";
+/** One row of the top table: a coloured dot, a name, and sentences about it. */
+function doctorRow(box, state, name, parts) {
+  const said = el("div", "said");
+  parts.filter(Boolean).forEach((p, i) => {
+    if (i) said.append(" · ");
+    said.append(typeof p === "string" ? p : p);
+  });
+  const dot = el("span", "dot " + state);
+  dot.title = { ok: tx("Working"), warn: tx("Working, with something to look at"), bad: tx("Not working"), busy: tx("Checking…"), off: tx("Not in use") }[state];
+  box.append(dot, el("div", "name", name), said);
+}
+const bad = text => el("span", "bad", text);
+function showDoctor(d) {
+  const box = $("#doctor-rows");
+  box.textContent = "";
+  for (const a of d.accounts) {
+    const c = a.check, failed = c?.state === "failed";
+    const state = c?.state === "running" ? "busy" : failed || a.last_error ? "bad" : !a.watching || a.waiting ? "warn" : "ok";
+    doctorRow(box, state, a.email, [
+      c?.state === "running" ? tx("Signing in…") : failed ? bad(tx("Couldn't sign in: {why}", { why: txServer(c.detail) }))
+        : c?.state === "ok" ? tx("Signed in to Gmail in {time}", { time: secs(c.ms) }) : "",
+      a.last_error && bad(tx("Last sync failed: {why}", { why: txServer(a.last_error) })),
+      a.watching ? tx("watching the inbox live") : tx("not watching live, checking on a timer"),
+      a.last_sync && tx("synced {when}", { when: ago(a.last_sync * 1000) }),
+      txn(a.messages, "{n} message listed", "{n} messages listed"),
+      a.listing && tx("still listing older mail"),
+      a.waiting ? txn(a.waiting, "{n} change waiting to reach Gmail", "{n} changes waiting to reach Gmail") : "",
+    ]);
+  }
+  if (!d.accounts.length) doctorRow(box, "off", "Gmail", [tx("No accounts yet.")]);
+  const m = d.model, host = m.endpoint.replace(/^https?:\/\//, "");
+  const mState = !m.has_key ? "off" : m.check?.state === "running" ? "busy" : m.check?.state === "failed" || (m.last && !m.last.ok && !m.check) ? "bad" : m.check?.state === "ok" || m.last?.ok ? "ok" : "off";
+  doctorRow(box, mState, tx("Assistant"), !m.has_key ? [tx("No API key yet, so the assistant is off.")] : [
+    m.check?.state === "running" ? tx("Asking the model for one word…") : m.check?.state === "failed" ? bad(txServer(m.check.detail))
+      : m.check?.state === "ok" ? tx("The model answered in {time}", { time: secs(m.check.ms) }) : "",
+    host, m.model,
+    m.last && (m.last.ok ? tx("last answered {when}", { when: ago(m.last.at) }) : tx("last request failed {when}", { when: ago(m.last.at) })),
+  ]);
+  const o = d.mcp;
+  doctorRow(box, o.requests ? "ok" : "off", tx("Other assistants (MCP)"), o.requests ? [
+    o.client || tx("an assistant"), txn(o.requests, "{n} request", "{n} requests"), tx("last heard from {when}", { when: ago(o.last) }),
+  ] : [tx("Nothing has connected since Unibox started."), o.helper ? tx("The helper for Claude Desktop is installed.") : ""]);
+  doctorRow(box, d.sync.activity || d.sync.syncing ? "busy" : "ok", tx("This PC"), [
+    d.sync.activity ? txServer(d.sync.activity) : d.sync.syncing ? tx("Syncing…") : tx("Idle"),
+    tx("{size} of mail kept here", { size: fmtSize(d.store.bytes) }),
+    d.store.search_ready ? tx("search index ready") : tx("search index being built"),
+  ]);
+}
+const doctorShows = l => (!doctor.show || l.channel === doctor.show) && (!doctor.problems || !l.ok);
+function doctorLine(l) {
+  const row = el("div", "ln" + (l.ok ? "" : " bad"));
+  const what = el("span", "what", l.what);
+  if (l.outcome) what.append(el("span", "out", "  →  " + l.outcome));
+  const who = { imap: l.who, model: l.who, mcp: l.who || "MCP", app: "Unibox" }[l.channel] || l.who;
+  row.append(el("span", "at", new Date(l.at).toLocaleTimeString(LOCALE, { hour12: false })), el("span", "who", who), what,
+    el("span", "ms", l.ms == null ? "" : l.ms < 1000 ? l.ms + " ms" : secs(l.ms)));
+  row.title = who;
+  row.onclick = () => row.classList.toggle("wide");   // a long command, in full
+  return row;
+}
+function fillDoctorLog() {
+  const box = $("#doctor-log"), lines = doctor.lines.filter(doctorShows);
+  box.textContent = "";
+  if (!lines.length) box.append(el("div", "empty", tx("Nothing yet.")));
+  box.append(...lines.slice(-1500).map(doctorLine));
+  box.scrollTop = box.scrollHeight;
+}
+async function pollDoctor() {
+  if (!$("#doctor-dialog").open) return;
+  const d = await api("/api/doctor?after=" + doctor.after).catch(() => null);
+  if (d && $("#doctor-dialog").open) {
+    showDoctor(d);
+    doctor.after = d.last;
+    if (d.lines.length) {
+      const box = $("#doctor-log"), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+      doctor.lines.push(...d.lines);
+      doctor.lines.splice(0, doctor.lines.length - 3000);
+      const fresh = d.lines.filter(doctorShows);
+      if (fresh.length) {
+        box.querySelector(".empty")?.remove();
+        box.append(...fresh.map(doctorLine));
+        while (box.children.length > 1500) box.firstChild.remove();
+        if (atEnd) box.scrollTop = box.scrollHeight;   // follow, unless you have scrolled back to read
+      }
+    }
+  }
+  doctor.timer = setTimeout(pollDoctor, 1000);
+}
+async function openDoctor() {
+  const dialog = $("#doctor-dialog");
+  if (dialog.open) return;
+  doctor.after = 0; doctor.lines = [];
+  dialog.showModal();
+  fillDoctorLog();
+  api("/api/doctor", { method: "POST" }).catch(() => {});   // try every connection afresh
+  clearTimeout(doctor.timer);
+  pollDoctor();
+}
+$("#doctor").onclick = () => { $("#doctor").blur(); openDoctor(); };
+$("#doctor-close").onclick = () => $("#doctor-dialog").close();
+$("#doctor-dialog").addEventListener("close", () => clearTimeout(doctor.timer));
+$("#doctor-again").onclick = () => api("/api/doctor", { method: "POST" }).catch(e => toast(txServer(e.message)));
+$("#doctor-show").onclick = e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  doctor.show = b.dataset.show;
+  for (const x of $("#doctor-show").children) x.setAttribute("aria-pressed", x === b);
+  fillDoctorLog();
+};
+$("#doctor-problems").onchange = e => { doctor.problems = e.target.checked; fillDoctorLog(); };
+$("#doctor-copy").onclick = async () => {
+  const text = doctor.lines.filter(doctorShows).map(l =>
+    [new Date(l.at).toISOString(), l.channel, l.who, l.what, l.outcome, l.ms == null ? "" : l.ms + " ms", l.ok ? "" : "FAILED"].join("\t")).join("\n");
+  await navigator.clipboard.writeText(text).then(() => toast(tx("Copied.")), () => toast(tx("Couldn't copy.")));
+};
+
 $("#subs").onclick = () => { $("#subs").blur(); openSubscriptions(); };
 $("#subs-close").onclick = () => $("#subs-dialog").close();
 
@@ -1705,6 +1830,7 @@ function onKey(e) {
   if (k === "Enter" && e.shiftKey) { openInWindow(); return e.preventDefault(); }
   if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; goInbox(); return e.preventDefault(); }
   if (gPending && Date.now() - gPending < 1500 && k === "s") { gPending = 0; openSubscriptions(); return e.preventDefault(); }
+  if (gPending && Date.now() - gPending < 1500 && k === "d") { gPending = 0; openDoctor(); return e.preventDefault(); }
   if (gPending && Date.now() - gPending < 1500 && k === "a") { gPending = 0; if (!state.all) setListFilter("all", true); return e.preventDefault(); }
   gPending = 0;
   // * then a selects every conversation in the list, * then n none (as in Gmail)

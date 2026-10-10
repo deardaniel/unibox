@@ -7,7 +7,7 @@
 //! send or delete anything.
 
 use crate::sync::App;
-use crate::{mime, secrets};
+use crate::{doctor, mime, secrets};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -469,9 +469,28 @@ impl App {
                 beta.push("server-side-fallback-2026-07-01");
             }
         }
+        let answer = self.ask_model(&base_url, &key, &body, &beta, 3);
+        doctor::model_answered(answer.is_ok(), &answer.as_ref().map(|_| String::new()).unwrap_or_else(|e| format!("{e:#}")));
+        answer
+    }
+
+    /// Ask the model for a single word, to see whether the endpoint, the key and the model
+    /// all work. Costs a handful of tokens.
+    pub(crate) fn model_check(&self) -> Result<()> {
+        let (base_url, model, _) = self.agent_config();
+        let key = secrets::get(&self.dir, KEY_NAME).map_err(|_| anyhow!("The assistant has no API key yet."))?;
+        let body = json!({ "model": model, "max_tokens": 1, "messages": [{ "role": "user", "content": "Say OK." }] });
+        self.ask_model(&base_url, &key, &body, &[], 1).map(|_| ())
+    }
+
+    /// Post one request to the model's API, trying again when it is overloaded.
+    fn ask_model(&self, base_url: &str, key: &str, body: &Value, beta: &[&str], tries: u32) -> Result<Value> {
+        let first_party = base_url.starts_with("https://api.anthropic.com");
         let url = format!("{base_url}/v1/messages");
+        let host = base_url.split("://").nth(1).unwrap_or(base_url).split('/').next().unwrap_or_default().to_string();
+        let what = format!("POST /v1/messages · {}", body["model"].as_str().unwrap_or_default());
         let mut last = anyhow!("no response");
-        for attempt in 0..3 {
+        for attempt in 0..tries {
             if attempt > 0 {
                 std::thread::sleep(std::time::Duration::from_secs(2 << attempt));
             }
@@ -479,7 +498,7 @@ impl App {
                 .timeout(std::time::Duration::from_secs(600))
                 .set("content-type", "application/json")
                 .set("anthropic-version", "2023-06-01")
-                .set("x-api-key", &key);
+                .set("x-api-key", key);
             if !first_party {
                 // gateways in front of the API usually take the key as a bearer token
                 request = request.set("authorization", &format!("Bearer {key}"));
@@ -487,14 +506,28 @@ impl App {
             if !beta.is_empty() {
                 request = request.set("anthropic-beta", &beta.join(","));
             }
-            match request.send_json(&body) {
-                Ok(response) => return Ok(response.into_json()?),
+            let began = std::time::Instant::now();
+            match request.send_json(body) {
+                Ok(response) => {
+                    let answer: Value = response.into_json()?;
+                    let used = &answer["usage"];
+                    let outcome = format!(
+                        "200 · {} tokens in, {} out",
+                        used["input_tokens"].as_i64().unwrap_or(0)
+                            + used["cache_read_input_tokens"].as_i64().unwrap_or(0)
+                            + used["cache_creation_input_tokens"].as_i64().unwrap_or(0),
+                        used["output_tokens"].as_i64().unwrap_or(0)
+                    );
+                    doctor::note("model", &host, &what, &outcome, true, Some(began.elapsed()));
+                    return Ok(answer);
+                }
                 Err(ureq::Error::Status(code, response)) => {
                     let text = response.into_string().unwrap_or_default();
                     let message = serde_json::from_str::<Value>(&text)
                         .ok()
                         .and_then(|v| v["error"]["message"].as_str().map(String::from))
                         .unwrap_or_else(|| text.chars().take(300).collect());
+                    doctor::note("model", &host, &what, &format!("{code} · {message}"), false, Some(began.elapsed()));
                     last = match code {
                         401 | 403 => anyhow!("The API key was not accepted ({code}). Check it in the assistant's settings."),
                         _ => anyhow!("The model's API answered {code}: {message}"),
@@ -504,7 +537,10 @@ impl App {
                         break;
                     }
                 }
-                Err(e) => last = anyhow!("Couldn't reach the model: {e}"),
+                Err(e) => {
+                    doctor::note("model", &host, &what, &e.to_string(), false, Some(began.elapsed()));
+                    last = anyhow!("Couldn't reach the model: {e}");
+                }
             }
         }
         Err(last)
