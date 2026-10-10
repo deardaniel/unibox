@@ -48,11 +48,13 @@ triage: replying opens the conversation in Gmail.
 
 **Seeing what it is doing**
 
-- Connection Doctor (`g` `d`, or the pulse line in the sidebar): whether each account signs
+- Doctor (`g` `d`, or the pulse line in the sidebar): whether each account signs
   in and is being watched live, whether the assistant's model answers, which other assistant
   last connected over MCP, and a running record of every command sent to Gmail, every request
   to the model and every MCP call, with sizes and timings. It tries each connection afresh
-  when opened. The record holds no mail and is gone when the app closes.
+  when opened. The record holds no mail and is gone when the app closes. It also says how much
+  disk space Unibox uses and on what: downloaded messages, the message list, the search index
+  and the window's cache.
 
 **Privacy**
 
@@ -191,7 +193,7 @@ Open `http://127.0.0.1:47921/` and add any address with any password (`wrong` is
 | `src/db.rs` | SQLite schema and queries |
 | `src/secrets.rs` | Passwords and keys in the Windows Credential Manager |
 | `src/agent.rs` | The assistant: model loop, tools, draft building |
-| `src/doctor.rs` | The connection doctor: the activity record and the checks |
+| `src/doctor.rs` | The doctor: the activity record, the checks and disk use |
 | `src/mcp.rs` | The same tools for other assistants, over MCP |
 | `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary); `i18n.js` holds the translations |
 | `tests/` | The pretend Gmail and Claude servers |

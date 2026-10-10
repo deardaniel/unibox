@@ -1,6 +1,6 @@
-//! The connection doctor: what the app has been saying to the outside world (Gmail over
+//! The doctor: what the app has been saying to the outside world (Gmail over
 //! IMAP, the assistant's model, other assistants over MCP) and whether each of those works
-//! right now. Kept in memory only: commands, sizes and timings, never the mail that came back.
+//! right now, and what it keeps on disk. Kept in memory only: commands, sizes and timings, never the mail that came back.
 
 use crate::imap::Imap;
 use crate::sync::App;
@@ -24,6 +24,8 @@ struct State {
     mcp: (String, i64, u64),
     /// The last real answer from the assistant's model: (when, whether it worked, what it said)
     model: Option<(i64, bool, String)>,
+    /// What the app's files take up on disk, as last measured.
+    disk: Option<Value>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -92,6 +94,7 @@ impl App {
     /// Everything the doctor window shows: the state of each connection, and the activity
     /// recorded after line `after`.
     pub fn doctor(&self, after: u64) -> anyhow::Result<Value> {
+        let disk = with(|s| s.disk.clone());
         let (lines, checks, mcp, model, last) = with(|s| {
             let lines: Vec<Value> = s.lines.iter().filter(|l| l["id"].as_u64().unwrap_or(0) > after).cloned().collect();
             (lines, s.checks.clone(), s.mcp.clone(), s.model.clone(), s.next)
@@ -112,7 +115,6 @@ impl App {
         }
         let (endpoint, model_name, has_key) = self.agent_config();
         let helper = std::env::current_exe().ok().and_then(|p| Some(p.parent()?.join("unibox-mcp.exe").exists())).unwrap_or(false);
-        let file = |name: &str| std::fs::metadata(self.dir.join(name)).map(|m| m.len()).unwrap_or(0);
         Ok(json!({
             "accounts": accounts,
             "server": self.imap_server,
@@ -120,8 +122,8 @@ impl App {
             "model": { "endpoint": endpoint, "model": model_name, "has_key": has_key, "check": checks.get("model"),
                        "last": model.map(|(at, ok, text)| json!({ "at": at, "ok": ok, "text": text })) },
             "mcp": { "client": mcp.0, "last": mcp.1, "requests": mcp.2, "helper": helper },
-            "store": { "bytes": file("mail.db") + file("mail.db-wal"),
-                       "search_ready": self.db.meta("search_index").ok().flatten().is_some() },
+            "disk": disk,
+            "store": { "search_ready": self.db.meta("search_index").ok().flatten().is_some() },
             "lines": lines,
             "last": last,
         }))
@@ -130,6 +132,11 @@ impl App {
     /// Try each connection afresh, in the background: sign in to every account, and ask the
     /// assistant's model for one word. The results appear in `doctor`.
     pub fn doctor_check(self: &Arc<App>) {
+        let app = self.clone();
+        std::thread::spawn(move || match app.disk_use() {
+            Ok(found) => with(|s| s.disk = Some(found)),
+            Err(e) => app.log(&format!("measuring disk use failed: {e:#}")),
+        });
         for a in self.db.accounts().unwrap_or_default() {
             let key = format!("imap:{}", a.id);
             set_check(&key, "running", None, "");
@@ -161,6 +168,55 @@ impl App {
                 }
             });
         }
+    }
+}
+
+/// Everything under a folder, in bytes.
+fn folder_size(dir: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    entries
+        .flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => folder_size(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+impl App {
+    /// What the app keeps on this PC and how big each part is: the mail store split into what
+    /// it holds, and the other files in the data folder. Reads the whole store, so it takes a
+    /// moment on a large mailbox.
+    fn disk_use(&self) -> anyhow::Result<Value> {
+        let c = self.db.conn()?;
+        let (mut bodies, mut list, mut search, mut other) = (0u64, 0u64, 0u64, 0u64);
+        let mut st = c.prepare("SELECT name, pgsize FROM dbstat WHERE aggregate=TRUE")?;
+        let sizes = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))?;
+        for row in sizes {
+            let (name, bytes) = row?;
+            match name.as_str() {
+                n if n.starts_with("bodies") || n.contains("autoindex_bodies") => bodies += bytes,
+                n if n.starts_with("search") => search += bytes,
+                n if n.starts_with("messages") || n.contains("autoindex_messages") => list += bytes,
+                _ => other += bytes,
+            }
+        }
+        let count = |sql: &str| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0);
+        let file = |name: &str| std::fs::metadata(self.dir.join(name)).map(|m| m.len()).unwrap_or(0);
+        let store = file("mail.db") + file("mail.db-wal") + file("mail.db-shm");
+        let window = folder_size(&self.dir.join("webview"));
+        let known = [store, window].iter().sum::<u64>();
+        Ok(json!({
+            "total": folder_size(&self.dir).max(known),
+            "bodies": bodies, "bodies_count": count("SELECT COUNT(*) FROM bodies"),
+            "list": list, "list_count": count("SELECT COUNT(*) FROM messages"),
+            "search": search,
+            // free pages, the write-ahead file and the small tables
+            "rest": store.saturating_sub(bodies + list + search).max(other),
+            "window": window,
+            "folder": self.dir.display().to_string(),
+        }))
     }
 }
 

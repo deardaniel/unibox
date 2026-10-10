@@ -160,7 +160,7 @@ impl App {
             }
             done.map_err(|e| format!("{e:#}"))
         };
-        // each message goes in the connection doctor's record: what was asked, how it went
+        // each message goes in the doctor's record: what was asked, how it went
         let noted = |m: &Value| -> Option<Value> {
             let began = std::time::Instant::now();
             let method = m["method"].as_str().unwrap_or("?");

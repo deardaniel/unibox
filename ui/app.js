@@ -1022,8 +1022,8 @@ async function openSubscriptions() {
     box.append(row);
   }
 }
-// ---- connection doctor -----------------------------------------------------------
-/** What the app is connected to and how each connection is doing, with a running record of
+// ---- doctor -----------------------------------------------------------
+/** What the app is connected to, how each connection is doing and what it keeps on disk, with a running record of
  *  what it says to Gmail, to the assistant's model and to other assistants. */
 const doctor = { after: 0, lines: [], show: "", problems: false, timer: 0, seen: null };
 const ago = ms => {
@@ -1075,8 +1075,22 @@ function showDoctor(d) {
   ] : [tx("Nothing has connected since Unibox started."), o.helper ? tx("The helper for Claude Desktop is installed.") : ""]);
   doctorRow(box, d.sync.activity || d.sync.syncing ? "busy" : "ok", tx("This PC"), [
     d.sync.activity ? txServer(d.sync.activity) : d.sync.syncing ? tx("Syncing…") : tx("Idle"),
-    tx("{size} of mail kept here", { size: fmtSize(d.store.bytes) }),
     d.store.search_ready ? tx("search index ready") : tx("search index being built"),
+  ]);
+  showDisk(box, d.disk);
+}
+const fmtBig = n => n < 1073741824 ? fmtSize(n) : (n / 1073741824).toLocaleString(LOCALE, { maximumFractionDigits: 2 }) + " GB";
+function showDisk(box, k) {
+  if (!k) return doctorRow(box, "busy", tx("Disk space"), [tx("Measuring…")]);
+  const folder = el("span", "", k.folder);
+  doctorRow(box, "ok", tx("Disk space"), [
+    el("b", "", tx("{size} in all", { size: fmtBig(k.total) })),
+    tx("downloaded messages {size} ({n})", { size: fmtBig(k.bodies), n: fmtNum(k.bodies_count) }),
+    tx("message list {size} ({n})", { size: fmtBig(k.list), n: fmtNum(k.list_count) }),
+    tx("search index {size}", { size: fmtBig(k.search) }),
+    tx("window cache {size}", { size: fmtBig(k.window) }),
+    k.rest > 1048576 && tx("other {size}", { size: fmtBig(k.rest) }),
+    folder,
   ]);
 }
 const doctorShows = l => (!doctor.show || l.channel === doctor.show) && (!doctor.problems || !l.ok);

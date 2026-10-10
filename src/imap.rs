@@ -179,7 +179,7 @@ pub struct Imap {
     /// A second handle on the socket, for changing its read timeout while idling.
     tcp: TcpStream,
     tag: u32,
-    /// Whose mailbox this is, and how much has been read from it, for the connection doctor.
+    /// Whose mailbox this is, and how much has been read from it, for the doctor.
     who: String,
     read: u64,
 }

@@ -649,7 +649,7 @@ struct DoctorQuery {
     after: u64,
 }
 
-/// The connection doctor: how each connection is doing, and the activity since `after`.
+/// The doctor: how each connection is doing, what is on disk, and the activity since `after`.
 async fn doctor_view(State(app): State<Arc<App>>, Query(q): Query<DoctorQuery>) -> Api<Json<serde_json::Value>> {
     Ok(Json(blocking(move || app.doctor(q.after)).await?))
 }

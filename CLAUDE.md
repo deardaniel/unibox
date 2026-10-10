@@ -18,7 +18,7 @@ changing or removing one, go through this list:
   in `Db::agent_query`, the tool descriptions and action list, and the instructions. If the
   list can filter or act on something, the tools should be able to as well. What the page
   tells the assistant about the screen (`list_is_showing` in `ui/app.js`) too.
-- **The connection doctor** (`src/doctor.rs`): anything new that talks to the outside world
+- **The doctor** (`src/doctor.rs`): anything new that talks to the outside world
   records what it did with `doctor::note` (commands, sizes, timings; never mail content or
   secrets), and gets a row in the window if it is a connection that can be up or down.
 - **README.md**: the feature list, how it works, and the source layout table.
