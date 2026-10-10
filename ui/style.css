@@ -145,7 +145,9 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 /* "All inboxes" is no account's colour: its count sits on the muted grey, in the page's own ground */
 .acct.all .n { color: var(--bg); }
 .acct .name, .acct .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.acct .key { font-weight: 400; }
+/* every key in the open rail sits in one column at its right edge */
+.acct .key { font-weight: 400; order: 5; }
+.acct .label[data-key] { justify-content: space-between; }
 /* The remove button only takes up room on the row being pointed at. */
 .acct .rm, .acct .pw { display: none; }
 #side .acct:hover .rm { display: revert; }
