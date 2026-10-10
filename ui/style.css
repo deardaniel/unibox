@@ -93,7 +93,7 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
       border-radius: var(--r-sm); padding: 2px 5px; background: var(--panel); }
 /* the key that does the same thing, shown on the control itself */
 [data-key]:not([data-key=""])::after { content: attr(data-key); margin-left: var(--s2); padding: 1px var(--s1); border: 1px solid var(--line);
-  border-radius: var(--r-sm); font: 400 11px/1.3 var(--mono); color: var(--muted); white-space: nowrap; }
+  border-radius: var(--r-sm); font: 400 var(--fs-key)/1.3 var(--mono); color: var(--muted); white-space: nowrap; }
 [aria-pressed="true"][data-key]::after { color: inherit; border-color: var(--accent-line); }
 
 /* ---- sidebar: a rail that opens over the content on hover ---- */
@@ -159,7 +159,7 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 /* the field's own focus: the accent border plus a one-pixel ring (DESIGN.md, the search field) */
 #query:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 #query > svg { flex: none; color: var(--muted); }
-#scope { flex: none; display: flex; align-items: center; gap: 3px; height: 24px; padding: 0 5px 0 var(--s2); border: 0; border-radius: var(--r-sm);
+#scope { flex: none; display: flex; align-items: center; gap: 3px; height: var(--control-h-sm); padding: 0 5px 0 var(--s2); border: 0; border-radius: var(--r-sm);
          background: var(--hover); font-weight: 600; font-size: var(--fs-small); white-space: nowrap; }
 #scope svg { color: var(--muted); order: 2; }
 #scope::after { margin-left: var(--s1) !important; }
@@ -167,7 +167,7 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #scope[aria-pressed="true"] { background: var(--tint); color: var(--accent); }
 #scope[aria-pressed="true"] svg { color: inherit; }
 #tokens { display: contents; }
-.token { flex: none; display: flex; align-items: center; height: 24px; padding: 0 2px 0 var(--s2); border-radius: var(--r-sm); white-space: nowrap;
+.token { flex: none; display: flex; align-items: center; height: var(--control-h-sm); padding: 0 2px 0 var(--s2); border-radius: var(--r-sm); white-space: nowrap;
          background: var(--tint); color: var(--accent); font: var(--fs-mono) var(--mono); max-width: 40%; }
 .token button { flex: none; width: 20px; height: 20px; margin-left: 2px; padding: 0; border: 0; border-radius: var(--r-sm); background: none;
                 color: inherit; font: var(--fs-subtitle)/1 var(--font); display: grid; place-items: center; }
@@ -338,7 +338,7 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .picbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 14px; font-size: var(--fs-small);
           color: var(--muted); border-bottom: 1px solid var(--line); }
 .picbar span { flex: 1 1 220px; }
-.picbar button { height: 24px; padding: 0 9px; font-size: var(--fs-small); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picbar button { height: var(--control-h-sm); padding: 0 9px; font-size: var(--fs-small); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card { margin: var(--s3) 14px; padding: var(--s3) 14px; border: 1px solid var(--line);
         border-radius: var(--r); background: var(--panel); font-size: var(--fs-small); max-width: 620px; }
 .card .kind { font-size: var(--fs-caption); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
@@ -488,7 +488,7 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #language { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
             height: var(--control-h); padding: 0 var(--s2); }
 #swatches { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: 14px; }
-#swatches button { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid var(--panel); outline: 1px solid var(--line); }
+#swatches button { width: var(--control-h); height: var(--control-h); padding: 0; border-radius: 50%; border: 2px solid var(--panel); outline: 1px solid var(--line); }
 #swatches button.on { outline: 2px solid var(--ink); }
 #colour-field { position: relative; height: 170px; margin-bottom: var(--s3); border-radius: var(--r-lg); border: 1px solid var(--line); cursor: crosshair;
   touch-action: none;
@@ -513,7 +513,7 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #subs-list { max-height: min(64vh, 660px); overflow-y: auto; margin: 0 -8px var(--s3); }
 #subs-list .empty { padding: var(--s5); text-align: center; color: var(--muted); }
 /* a table: avatar, sender, three counts, archive what is in the inbox, unsubscribe */
-.sub { display: grid; grid-template-columns: 28px minmax(0, 1fr) 92px 56px 60px 28px 104px; align-items: center;
+.sub { display: grid; grid-template-columns: 28px minmax(0, 1fr) 92px 56px 60px var(--control-h) 104px; align-items: center;
   column-gap: 10px; padding: 6px var(--s2); border-radius: var(--r); cursor: pointer; }
 .sub:not(.head):hover, .sub:focus-visible { background: var(--hover); }
 /* inside the row, as an outline: the list would clip a ring drawn around it */
@@ -528,10 +528,10 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 .sub .addr { color: var(--muted); font-size: var(--fs-small); }
 /* the two actions are plain until pointed at, so a long list is not a wall of buttons */
 .sub .clear { margin-left: -9px; }   /* the icon belongs to the count beside it */
-.sub .clear button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--muted); }
+.sub .clear button { display: grid; place-items: center; width: var(--control-h); height: var(--control-h); padding: 0; color: var(--muted); }
 .sub .clear button:hover { color: var(--ink); background: var(--panel); border-color: var(--line); }
 .sub .leave { text-align: right; }
-.sub .unsub { background: none; border-color: transparent; color: var(--accent); height: 28px; padding: 0 var(--s2); font-size: var(--fs-small); white-space: nowrap; }
+.sub .unsub { background: none; border-color: transparent; color: var(--accent); padding: 0 var(--s2); font-size: var(--fs-small); white-space: nowrap; }
 .sub .unsub:hover:not(:disabled) { background: var(--panel); border-color: var(--line); }
 .sub .unsub:disabled { color: var(--muted); opacity: 1; cursor: default; }
 .sub.done .who, .sub.done .num { opacity: .55; }
@@ -548,7 +548,7 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #doctor-rows .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
 #doctor-rows .said { color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
 #doctor-rows .said b { color: var(--ink); font-weight: 500; }
-#doctor-rows .said button { height: 22px; padding: 0 var(--s2); font-size: var(--fs-caption); margin-left: 2px; }
+#doctor-rows .said button { height: var(--control-h-sm); padding: 0 var(--s2); font-size: var(--fs-caption); margin-left: 2px; }
 /* what went wrong, exactly as it was reported */
 #doctor-rows .said .bad { color: var(--danger); font: var(--fs-mono)/18px var(--mono); }
 #doctor-bar { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); flex-wrap: wrap; }
