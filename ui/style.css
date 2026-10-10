@@ -102,7 +102,7 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 [data-key]:not([data-key=""]):not([hidden]) { display: inline-flex; align-items: center; gap: var(--s2); }
 [data-key]:not([data-key=""])::after { content: attr(data-key); flex: none; box-sizing: border-box; height: 18px; min-width: 18px; padding: 0 4px;
   display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r-sm);
-  font: 400 var(--fs-key)/1 var(--mono); color: var(--muted); white-space: nowrap; }
+  font: 400 var(--fs-key)/1 var(--font); color: var(--muted); white-space: nowrap; }
 [aria-pressed="true"][data-key]::after { color: inherit; border-color: var(--accent-line); }
 
 /* ---- sidebar: a rail that opens over the content on hover ---- */
@@ -238,7 +238,7 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
    segment, plainly not a control of its own. */
 .seg .cap { align-self: stretch; display: grid; place-items: center; margin-left: -1px; padding: 0 var(--s2);
             border: 1px solid var(--line); border-radius: 0 var(--r) var(--r) 0; background: var(--bg); color: var(--muted);
-            font: 400 var(--fs-key)/1 var(--mono); pointer-events: none; user-select: none; }
+            font: 400 var(--fs-key)/1 var(--font); pointer-events: none; user-select: none; }
 .seg button:focus-visible { position: relative; z-index: 1; }   /* the ring clears its neighbour */
 .toggle { padding: 0 var(--s3); white-space: nowrap; }
 .toggle[aria-pressed="true"] { background: var(--tint); border-color: var(--accent); color: var(--accent); font-weight: 600;
