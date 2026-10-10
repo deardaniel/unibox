@@ -263,6 +263,8 @@ fn sanitize(html: &str) -> String {
 }
 
 /// The frame is as tall as its content, so the page inside must not size itself to the frame.
+/// In the dark theme the page flips the whole frame, so a mail with no ground of its own is
+/// given the one that flips to the page's `--panel` (#2a2a2a), not white, which flips to black.
 /// Marketing mail routinely says `html, body { height: 100% !important }`; the `:root`
 /// selectors here outrank that wherever it appears.
 const FRAME_CSS: &str = "
@@ -275,6 +277,7 @@ img:not([width]):not([height]){max-width:100%;height:auto}
 pre{white-space:pre-wrap}
 blockquote{margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex}
 html.dk img:not([data-keep]){filter:invert(1) hue-rotate(180deg)}
+html.dk body{background:#d5d5d5}
 ";
 
 fn frame(body: &str) -> String {
