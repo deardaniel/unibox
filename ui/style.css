@@ -105,9 +105,9 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
         background: var(--bg); border-right: 1px solid var(--line); white-space: nowrap;
         transition: width var(--t-rail) ease, box-shadow var(--t-rail) ease; }
 #side:hover, #side:focus-within { width: 250px; box-shadow: var(--shadow-float); transition-delay: var(--t-rail); }
-#side .label, #side .name, #side .rm, #side .pw { display: none; }
-#side:hover .label, #side:hover .name,
-#side:focus-within .label, #side:focus-within .name { display: revert; }
+#side .label, #side .name, #side .key, #side .rm, #side .pw { display: none; }
+#side:hover .label, #side:hover .name, #side:hover .key,
+#side:focus-within .label, #side:focus-within .name, #side:focus-within .key { display: revert; }
 /* The remove button only takes up room on the row being pointed at, so the counts line up. */
 #side .acct:hover .rm { display: revert; }
 #side .acct:hover .pw { display: grid; }
@@ -129,6 +129,8 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 .acct .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .acct .n { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; font-size: var(--fs-caption); }
 #side:hover .acct .n, #side:focus-within .acct .n { order: 3; font-size: inherit; }
+.acct .key { order: 2; font-weight: 400; }
+.acct .key::after { margin-left: 0; }
 .acct .rm { color: var(--muted); padding: 0 2px; order: 4; }
 .acct .rm:hover { color: var(--danger); }
 .acct .pw { color: var(--muted); order: 4; place-items: center; }
@@ -210,7 +212,7 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 /* The bar's filter buttons: plain while off, tinted with the accent while on (a filter in
    force, not a mode), the same as the pieces in the search field. People and Automated are a
    joined pair because at most one of them is on. */
-.seg { display: flex; flex: none; }
+.seg { display: flex; flex: none; align-items: center; }
 .seg button { border-radius: 0; margin-left: -1px; }
 .seg button:first-child { border-radius: var(--r) 0 0 var(--r); margin-left: 0; }
 .seg button:last-child { border-radius: 0 var(--r) var(--r) 0; }

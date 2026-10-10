@@ -187,11 +187,14 @@ function renderAccounts() {
   const nav = $("#accounts");
   if (nav.querySelector(".dragging")) return;   // don't rebuild the rows under a drag
   nav.textContent = "";
+  let number = 0;   // the key that shows this one: 0 for all, then 1 to 9
   const item = (id, name, color, unread, acct) => {
     const b = el("button", "acct" + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : "") + (unread ? "" : " zero"));
     b.style.setProperty("--c", color);
     const dot = el("span", "dot");
     b.append(dot, el("span", "n", unread || ""), el("span", "name", name));
+    if (number < 10) { const k = el("span", "key"); k.dataset.key = number; b.append(k); }
+    number++;
     b.title = acct ? (acct.last_error ? tx("{email}: sync problem: {error}", { email: acct.email, error: acct.last_error }) : acct.email) : tx("All inboxes");
     if (acct) {
       const rm = el("span", "rm", "×");
