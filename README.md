@@ -38,6 +38,8 @@ triage: replying opens the conversation in Gmail.
 - Calendar invitations, flights, bookings and orders as a summary card above the message.
 - An Unsubscribe button where the sender supports one-click unsubscribe (RFC 8058).
 - "Archive everything from this sender" in a message's menu.
+- Subscriptions (`g` `s`, or the envelope in the sidebar): every sender you can unsubscribe
+  from, busiest first, with buttons to unsubscribe, list its mail, or clear it from the inbox.
 
 **Privacy**
 

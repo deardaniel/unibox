@@ -811,7 +811,7 @@ function unsubscribeButton(m) {
       toast("Opened the sender's unsubscribe page in your browser.");
     } else {
       // an address to write to: hand Gmail a filled-in message from the right account
-      const mail = new URL(u.mailto), a = account(state.open?.account_id);
+      const mail = new URL(u.mailto), a = account(m.account_id ?? state.open?.account_id);
       const p = new URLSearchParams({ view: "cm", fs: 1, to: decodeURIComponent(mail.pathname),
         su: mail.searchParams.get("subject") || "unsubscribe", body: mail.searchParams.get("body") || "unsubscribe" });
       if (a) p.set("authuser", a.email);
@@ -821,6 +821,61 @@ function unsubscribeButton(m) {
   };
   return b;
 }
+
+// ---- subscriptions -------------------------------------------------------------
+/** Every sender whose mail says how to unsubscribe, with how much it sends, and the buttons
+ *  to do something about it: unsubscribe, look at its mail, clear it out of the inbox. */
+async function openSubscriptions() {
+  const box = $("#subs-list"), dialog = $("#subs-dialog");
+  box.textContent = "";
+  box.append(el("div", "empty", "Looking…"));
+  if (!dialog.open) dialog.showModal();
+  const p = new URLSearchParams();
+  if (state.filter != null) p.set("account", state.filter);
+  const rows = await api("/api/subscriptions?" + p).catch(e => (toast(e.message), []));
+  box.textContent = "";
+  if (!rows.length) box.append(el("div", "empty", "No senders with an unsubscribe link yet."));
+  const n = x => x.toLocaleString();
+  for (const r of rows) {
+    const row = el("div", "sub" + (r.unsubscribed ? " done" : ""));
+    const av = avatar(r.from_name, r.from_addr);
+    if (state.accounts.length > 1) {
+      const dot = el("span", "who-dot");
+      dot.style.background = account(r.account_id)?.color || "gray";
+      av.append(dot);
+      av.title = account(r.account_id)?.email || "";
+    }
+    const who = el("div", "who");
+    who.append(el("div", "name", r.from_name || r.from_addr), el("div", "addr", r.from_addr),
+      el("div", "n", (r.recent ? `${n(r.recent)} in the last 3 months` : "None in the last 3 months")
+        + ` · ${n(r.total)} in all` + (r.in_inbox ? ` · ${n(r.in_inbox)} in the inbox` : "")));
+    const does = el("div", "does");
+    const m = { id: r.id, account_id: r.account_id, from_name: r.from_name, from_addr: r.from_addr, unsubscribed: r.unsubscribed, facts: { unsubscribe: r.unsubscribe } };
+    const leave = unsubscribeButton(m);
+    if (leave) { leave.addEventListener("click", () => row.classList.add("done")); does.append(leave); }
+    const look = el("button", "", "Show mail");
+    look.title = "List everything from this sender";
+    look.onclick = () => {
+      dialog.close();
+      leaveCollection();
+      state.all = true; state.unreadOnly = false; state.kind = ""; state.filter = r.account_id;
+      state.q = $("#search").value = r.from_addr;
+      state.cursor = 0; state.selected.clear();
+      showListFilters(); renderAccounts(); hideView(); loadThreads(true);
+    };
+    does.append(look);
+    if (r.in_inbox) {
+      const clear = el("button", "", "Archive all");
+      clear.title = "Archive everything in the inbox from this sender";
+      clear.onclick = async () => { await archiveAllFrom(m, r.from_name || r.from_addr); clear.remove(); };
+      does.append(clear);
+    }
+    row.append(av, who, does);
+    box.append(row);
+  }
+}
+$("#subs").onclick = () => { $("#subs").blur(); openSubscriptions(); };
+$("#subs-close").onclick = () => $("#subs-dialog").close();
 
 // ---- pictures ------------------------------------------------------------------
 // Fetching a picture from the sender's server tells them the message was opened, and when and
@@ -1497,6 +1552,7 @@ function onKey(e) {
   }
   if (k === "Enter" && e.shiftKey) { openInWindow(); return e.preventDefault(); }
   if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; goInbox(); return e.preventDefault(); }
+  if (gPending && Date.now() - gPending < 1500 && k === "s") { gPending = 0; openSubscriptions(); return e.preventDefault(); }
   if (gPending && Date.now() - gPending < 1500 && k === "a") { gPending = 0; if (!state.all) setListFilter("all", true); return e.preventDefault(); }
   gPending = 0;
   // * then a selects every conversation in the list, * then n none (as in Gmail)

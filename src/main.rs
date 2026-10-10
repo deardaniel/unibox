@@ -344,6 +344,16 @@ async fn same_source(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<Js
     Ok(Json(blocking(move || app.db.threads_from_same_source(id)).await?))
 }
 
+#[derive(Deserialize)]
+struct SubscriptionQuery {
+    account: Option<i64>,
+}
+
+/// Every sender that offers a way to unsubscribe, with how much it sends.
+async fn subscriptions(State(app): State<Arc<App>>, Query(q): Query<SubscriptionQuery>) -> Api<Json<Vec<serde_json::Value>>> {
+    Ok(Json(blocking(move || app.db.subscriptions(q.account)).await?))
+}
+
 /// Leave a mailing list by the sender's own one-click address, and remember having done so.
 async fn unsubscribe(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<StatusCode> {
     let logger = app.clone();
@@ -608,6 +618,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/unarchive", post(unarchive))
+        .route("/api/subscriptions", get(subscriptions))
         .route("/api/agent", get(agent_view).post(agent_send))
         .route("/api/agent/reset", post(agent_reset))
         .route("/api/agent/stop", post(agent_stop))

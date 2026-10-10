@@ -564,6 +564,42 @@ impl Db {
         Ok(row.map(|(from, facts)| (from, facts.and_then(|f| serde_json::from_str(&f).ok()).unwrap_or_default())))
     }
 
+    /// Senders whose mail says how to unsubscribe, busiest in the last three months first:
+    /// one row per account and sender address, as JSON objects for the UI.
+    pub fn subscriptions(&self, account: Option<i64>) -> Result<Vec<serde_json::Value>> {
+        let c = self.conn()?;
+        let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64
+            - 90 * 86400;
+        // (the bare columns come from each sender's newest message)
+        let mut st = c.prepare(
+            "SELECT m.account_id, m.from_addr, MAX(m.date), m.from_name, m.id, json_extract(m.facts, '$.unsubscribe'),
+                    COUNT(*), SUM(m.date >= ?2) AS recent, SUM(m.in_inbox),
+                    EXISTS (SELECT 1 FROM unsubscribed u WHERE u.sender = lower(m.from_addr))
+               FROM messages m
+              WHERE m.facts LIKE '%\"unsubscribe\":{%' AND json_extract(m.facts, '$.group') IS NULL
+                AND m.from_addr <> ''
+                AND (?1 IS NULL OR m.account_id=?1)
+                AND lower(m.from_addr) NOT IN (SELECT lower(email) FROM accounts)
+              GROUP BY m.account_id, lower(m.from_addr)
+              ORDER BY recent DESC, COUNT(*) DESC, lower(m.from_addr)",
+        )?;
+        let rows = st.query_map(params![account, since], |r| {
+            Ok(serde_json::json!({
+                "account_id": r.get::<_, i64>(0)?,
+                "from_addr": r.get::<_, String>(1)?,
+                "latest": r.get::<_, i64>(2)?,
+                "from_name": r.get::<_, String>(3)?,
+                "id": r.get::<_, i64>(4)?,
+                "unsubscribe": r.get::<_, Option<String>>(5)?.and_then(|u| serde_json::from_str::<serde_json::Value>(&u).ok()),
+                "total": r.get::<_, i64>(6)?,
+                "recent": r.get::<_, i64>(7)?,
+                "in_inbox": r.get::<_, i64>(8)?,
+                "unsubscribed": r.get::<_, bool>(9)?,
+            }))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     // ---- small lists the person builds up ----------------------------------
     pub fn mark_unsubscribed(&self, sender: &str) -> Result<()> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
