@@ -437,6 +437,10 @@ iframe.body { display: block; width: 100%; height: 120px; border: 0; background:
 #assistant > header button { padding: 0 var(--s2); color: var(--muted); }
 #as-log { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 #as-log .hint { color: var(--muted); margin: auto 0; text-align: center; line-height: 1.7; }
+/* the way back from a new chat: quiet, a link in all but name */
+#as-log .hint .previous { display: block; margin: var(--s3) auto 0; height: auto; padding: 0 var(--s1); border: 0; background: none;
+                          color: var(--muted); font-size: var(--fs-small); text-decoration: underline; }
+#as-log .hint .previous:hover { color: var(--ink); background: none; }
 #as-log .hint b { display: block; color: var(--ink); margin-bottom: var(--s1); }
 .as-msg { max-width: 100%; overflow-wrap: anywhere; line-height: 1.5; }
 .as-msg.user { align-self: flex-end; max-width: 88%; background: var(--accent); color: var(--on-accent); padding: 7px 11px;

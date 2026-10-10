@@ -31,7 +31,7 @@ pub struct AgentState {
     cancel: AtomicBool,
     /// What it is doing right now, for the panel ("Looking through your mail…").
     status: Mutex<String>,
-    /// The conversation a new chat replaced, kept while the window still offers to bring it back.
+    /// The conversation a new chat replaced, kept until the new one gets its first message.
     stash: Mutex<Option<Vec<(String, Value)>>>,
     pub collection: Mutex<Option<Collection>>,
 }
@@ -313,6 +313,7 @@ impl App {
             "busy": self.agent.busy.load(Ordering::Relaxed),
             "status": *self.agent.status.lock().unwrap(),
             "collection": collection,
+            "previous": self.agent.stash.lock().unwrap().is_some(),
             "messages": messages,
         }))
     }
@@ -321,7 +322,11 @@ impl App {
         if self.agent.busy.load(Ordering::Relaxed) {
             bail!("The assistant is still working.");
         }
-        *self.agent.stash.lock().unwrap() = Some(self.db.agent_history()?);
+        // a new chat on top of an empty one changes nothing: what is kept stays kept
+        let now = self.db.agent_history()?;
+        if !now.is_empty() {
+            *self.agent.stash.lock().unwrap() = Some(now);
+        }
         self.db.agent_clear()?;
         self.emit("agent", "");
         Ok(())
@@ -341,10 +346,7 @@ impl App {
         Ok(())
     }
 
-    /// Let go of the conversation kept by the last new chat.
-    pub fn agent_forget(&self) {
-        *self.agent.stash.lock().unwrap() = None;
-    }
+
 
     pub fn agent_stop(&self) {
         self.agent.cancel.store(true, Ordering::Relaxed);
@@ -369,6 +371,8 @@ impl App {
             bail!("The assistant is still working on the last thing you asked.");
         }
         self.agent.cancel.store(false, Ordering::Relaxed);
+        // the new chat is under way: the one it replaced can no longer be brought back
+        *self.agent.stash.lock().unwrap() = None;
         let prepared = (|| -> Result<()> {
             // If the app was closed half-way through a turn, the log ends with tool calls that
             // never got an answer. The API rejects that, so answer them now.

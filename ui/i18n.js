@@ -389,7 +389,7 @@ const MESSAGES = {
     "Archived {n} messages.": "メッセージ {n} 件をアーカイブしました。",
     "Archived {n} message from {sender}.": "{sender} からのメッセージ {n} 件をアーカイブしました。",
     "Archived {n} messages from {sender}.": "{sender} からのメッセージ {n} 件をアーカイブしました。",
-    "New chat started.": "新しいチャットを開始しました。",
+    "Back to the previous chat": "前のチャットに戻る",
     "{n} sender": "送信者 {n} 件",
     "{n} senders": "送信者 {n} 件",
     "{n} still in your inbox": "受信トレイに {n} 件",

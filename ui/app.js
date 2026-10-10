@@ -2324,6 +2324,11 @@ function renderAssistant() {
       tx("“Find all my delivery emails”"), el("br"), tx("“Archive the ones from before this year”"), el("br"),
       tx("“What did they say about the refund?”"), el("br"), tx("“Draft a reply saying Saturday works”"));
     log.append(hint);
+    if (d.previous) {
+      const back = el("button", "previous", tx("Back to the previous chat"));
+      back.onclick = () => api("/api/agent/restore", { method: "POST" }).catch(err => toast(txServer(err.message)));
+      hint.append(back);
+    }
   }
   for (const m of d.messages) {
     if (m.role === "user") { log.append(el("div", "as-msg user", m.text)); continue; }
@@ -2391,14 +2396,8 @@ $("#assistant").addEventListener("click", async e => {
   if (act === "settings") { assistant.setup = !assistant.setup; renderAssistant(); }
   if (act === "cancel-setup") { assistant.setup = false; renderAssistant(); }
   if (act === "new") {
-    // at once, with the previous chat kept until the offer to bring it back has gone
-    const had = assistant.data?.messages.length;
-    api("/api/agent/reset", { method: "POST" }).then(() => {
-      if (had) toast(tx("New chat started."), {
-        undo: () => api("/api/agent/restore", { method: "POST" }).catch(err => toast(txServer(err.message))),
-        gone: () => api("/api/agent/forget", { method: "POST" }).catch(() => {}),
-      });
-    }).catch(err => toast(txServer(err.message)));
+    // at once: the previous chat is kept, and offered back, until this one gets its first message
+    api("/api/agent/reset", { method: "POST" }).catch(err => toast(txServer(err.message)));
   }
 });
 $("#as-setup").addEventListener("submit", async e => {
