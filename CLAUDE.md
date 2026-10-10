@@ -3,6 +3,14 @@
 Build, test and install with `./build.sh`, `PATH="$HOME/.cargo/bin:$PATH" cargo test` and
 `./install.sh` (see README). Commit each logical change separately and push before installing.
 
+## Design
+
+Every interface change follows `DESIGN.md`, Unibox's design system, and goes through the
+checklist at its end: tokens only outside `:root`, right in light and dark with the purple,
+amber and grey swatches, every control showing its key, no motion beyond the budget, and tried
+at full size if it touches the list. The tokens at the top of `ui/style.css` are the ones in
+`DESIGN.md`; change both together, and the window background in `src/main.rs` with `--bg`.
+
 ## Keep everything in step
 
 A feature is not finished until every place that describes or exposes it agrees. When adding,
@@ -21,6 +29,8 @@ changing or removing one, go through this list:
 - **The doctor** (`src/doctor.rs`): anything new that talks to the outside world
   records what it did with `doctor::note` (commands, sizes, timings; never mail content or
   secrets), and gets a row in the window if it is a connection that can be up or down.
+- **DESIGN.md**: a new kind of control, a new token, or a rule that turned out not to fit goes
+  in the design system, not only in the stylesheet.
 - **README.md**: the feature list, how it works, and the source layout table.
 - **The fake servers** (`tests/fake_gmail.py`, `tests/fake_claude.py`): mail or behaviour that
   exercises the feature, so it can be tried without real mail.

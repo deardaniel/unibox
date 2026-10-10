@@ -198,3 +198,4 @@ Open `http://127.0.0.1:47921/` and add any address with any password (`wrong` is
 | `src/mcp.rs` | The same tools for other assistants, over MCP |
 | `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary); `i18n.js` holds the translations |
 | `tests/` | The pretend Gmail and Claude servers |
+| `DESIGN.md` | The design system: principles, tokens, components, and the checklist for interface changes |
