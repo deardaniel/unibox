@@ -182,7 +182,7 @@ function taskbarBadge(n) {
   if (!n) return window.ipc.postMessage("badge:");
   const s = Math.max(16, Math.min(64, Math.round(16 * devicePixelRatio)));
   const c = Object.assign(document.createElement("canvas"), { width: s, height: s }), g = c.getContext("2d");
-  g.fillStyle = token("--danger");
+  g.fillStyle = token("--badge");
   // a little smaller than the slot Windows gives it, like other apps' badges
   g.beginPath(); g.arc(s / 2, s / 2, s * 0.4, 0, 2 * Math.PI); g.fill();
   g.fillStyle = token("--on-strong");
@@ -888,10 +888,10 @@ function unsubscribeButton(m) {
 // One colour, picked by the person, from which the style sheet shades everything (--pick).
 // It is kept for next time, shared with other open windows, and the window's own icon and
 // the page icon are redrawn in it.
-// The default is the style sheet's own --pick, read before anything overrides it; the other
-// colours on offer are tokens too.
+// The default is the style sheet's own --pick, read before anything overrides it (it is also
+// the first swatch); the colours on offer are tokens too.
 const PURPLE = token("--pick").toLowerCase();
-const COLOURS = [PURPLE, ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => token("--swatch-" + i))];
+const COLOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => token("--swatch-" + i));
 const pickedColour = () => (/^#[0-9a-f]{6}$/i.test(store.get("accent") || "") ? store.get("accent").toLowerCase() : PURPLE);
 function applyColour(hex) {
   document.documentElement.style.setProperty("--pick", hex);

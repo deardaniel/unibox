@@ -77,12 +77,18 @@ a deliberate off-grid padding) may stay literal: snapping them would move things
   --scrim: rgba(0,0,0,.45);                       /* behind a dialog */
   --stage: rgba(0,0,0,.93); --stage-muted: #bbb;  /* behind an attachment shown in place */
   --spectrum: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);  /* the hue strip */
+  --badge: #c42b1c;       /* the taskbar unread badge: drawn on Windows' own chrome, so one red in both themes */
+  /* --av-1 … --av-8: avatar colours; --swatch-1 … --swatch-10: the colours offered in Appearance
+     (--swatch-1 is the default purple). Same in both themes; the script reads them. */
+  color-scheme: light dark;
 
   /* depth and motion */
   --shadow-float: 0 8px 24px rgba(0,0,0,.12);
   --shadow-modal: 0 24px 64px rgba(0,0,0,.2);
   --focus: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+  --focus-field: 0 0 0 1px var(--accent);   /* with an accent border: a field being typed in, a divider being dragged */
   --t-rail: 120ms;
+  --t-busy: 300ms;   /* how long work runs before a spinner or busy dot shows */
   --t-spin: 1s; --t-pulse: 1.6s;   /* indicators that show work is running; not transitions */
 }
 @media (prefers-color-scheme: dark) {
@@ -156,7 +162,9 @@ removable with ×), then what is typed. Typed filters (`is:unread`, `in:all`, `f
 the matching token or scope. Focus: accent border plus a 1 px accent ring. Suggestions float
 (`--r-lg`, `--shadow-float`) with the key hints on their last line.
 
-**Conversation rows.** Fixed height, so 140,000 rows scroll without layout work. Unread is
+**Conversation rows.** Fixed height, set on the row itself (`height: var(--row-h)`), never
+taken from its content, so 140,000 rows scroll without layout work and line up at every display
+scale. Unread is
 `--unread-bg` and weight 650, never colour. The cursor is a 4 px `--cursor` bar the full
 height of the row; selection is `--tint` plus a tick over the avatar, so it still shows when
 the picked colour is grey; the open conversation is a neutral shade. The outline of rows is
@@ -177,13 +185,24 @@ its text. A failure shows its full detail inline in `--mono`, `--danger` text; i
 collapsed, summarised or put in a banner. Group rows by subsystem (in the Doctor: Mail, Assistant,
 Other assistants, Search index, Disk), each with an icon, a name and a protocol tag.
 
+Work in progress is detail too: an account row says what it is doing in the same words the rail
+uses ("Listing older mail… back to March 2019"), not a summary of it.
+
 The one fill a status colour may take is the **caution about a message's safety** (a phishing
 or spoofing warning, the link that does not go where it says): it is meant to interrupt, so it
 keeps its `--danger` tint and border. Nothing else gets one.
 
-**Dialogs.** `--r-xl`, `--panel`, `--shadow-modal`, over a dimmed window. Title at 20 px; a
-muted line saying what this is; the content; a footer with a summary on the left and actions on
-the right. `Esc` closes. The focused default action shows the focus ring.
+**Dialogs.** `--r-xl`, `--panel`, `--shadow-modal`, over `--scrim`. Title at 20 px; a muted
+line saying what this is, only where the title does not already say it; the content; actions on
+the right of the footer, with a summary on the left only where there is a count worth
+knowing (Subscriptions: senders, mail still in the inbox). `Esc` closes. The focused default
+action shows the focus ring.
+
+**Asking first.** Ask only before something that cannot be undone: removing an account,
+deleting downloaded copies. Those may use the system's own question box; it is native and
+expected. Everything that can be undone (archive, archive all from a sender, mark, star, move)
+happens at once and offers Undo (`z`) in a toast. Never ask "are you sure?" about an undoable
+action.
 
 ## Speed
 

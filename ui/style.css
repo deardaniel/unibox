@@ -1,4 +1,5 @@
-/* The tokens: the block below is the one in DESIGN.md. Change both together. */
+/* The tokens: the block below is the one in DESIGN.md, with the avatar and swatch colours it
+   describes written out. Change both together. */
 :root {
   /* neutrals */
   --bg: #f4f4f3;        /* the window */
@@ -44,12 +45,22 @@
   --scrim: rgba(0,0,0,.45);                       /* behind a dialog */
   --stage: rgba(0,0,0,.93); --stage-muted: #bbb;  /* behind an attachment shown in place */
   --spectrum: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);  /* the hue strip */
+  --badge: #c42b1c;       /* the taskbar unread badge: drawn on Windows' own chrome, so one red in both themes */
+  /* --av-1 … --av-8: avatar colours; --swatch-1 … --swatch-10: the colours offered in Appearance
+     (--swatch-1 is the default purple). Same in both themes; the script reads them. */
+  --av-1: #5b8def; --av-2: #e0723c; --av-3: #3fae7a; --av-4: #b667d6;
+  --av-5: #c9961a; --av-6: #d8587e; --av-7: #4aa8b8; --av-8: #8a7f6a;
+  --swatch-1: #5b2ee8; --swatch-2: #3b4fe0; --swatch-3: #1a73e8; --swatch-4: #0b8a8f; --swatch-5: #1e8e3e;
+  --swatch-6: #c77700; --swatch-7: #e8590c; --swatch-8: #d93025; --swatch-9: #d6338a; --swatch-10: #55585e;
+  color-scheme: light dark;
 
   /* depth and motion */
   --shadow-float: 0 8px 24px rgba(0,0,0,.12);
   --shadow-modal: 0 24px 64px rgba(0,0,0,.2);
   --focus: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+  --focus-field: 0 0 0 1px var(--accent);   /* with an accent border: a field being typed in, a divider being dragged */
   --t-rail: 120ms;
+  --t-busy: 300ms;   /* how long work runs before a spinner or busy dot shows */
   --t-spin: 1s; --t-pulse: 1.6s;   /* indicators that show work is running; not transitions */
 }
 @media (prefers-color-scheme: dark) {
@@ -63,16 +74,6 @@
     --shadow-float: 0 8px 24px rgba(0,0,0,.5);
     --shadow-modal: 0 24px 64px rgba(0,0,0,.6);
   }
-}
-/* Beside the block above: the avatar colours DESIGN.md names (--av-1…), read by ui/app.js. */
-:root {
-  color-scheme: light dark;
-  --av-1: #5b8def; --av-2: #e0723c; --av-3: #3fae7a; --av-4: #b667d6;
-  --av-5: #c9961a; --av-6: #d8587e; --av-7: #4aa8b8; --av-8: #8a7f6a;
-  --t-busy: 300ms;   /* how long work runs before a spinner or busy dot says so */
-  /* the colours offered in the Appearance dialog, after the default (--pick) */
-  --swatch-2: #3b4fe0; --swatch-3: #1a73e8; --swatch-4: #0b8a8f; --swatch-5: #1e8e3e; --swatch-6: #c77700;
-  --swatch-7: #e8590c; --swatch-8: #d93025; --swatch-9: #d6338a; --swatch-10: #55585e;
 }
 @media (prefers-color-scheme: dark) {
   /* Emails are light-only HTML: flip the frame, and its images get flipped back from inside. */
@@ -173,7 +174,7 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #query { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; gap: 6px; padding: 0 var(--s2) 0 10px;
          background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); cursor: text; }
 /* the field's own focus: the accent border plus a one-pixel ring (DESIGN.md, the search field) */
-#query:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#query:focus-within { border-color: var(--accent); box-shadow: var(--focus-field); }
 #query > svg { flex: none; color: var(--muted); }
 #scope { flex: none; display: flex; align-items: center; gap: 3px; height: var(--control-h-sm); padding: 0 5px 0 var(--s2); border: 0; border-radius: var(--r-sm);
          background: var(--hover); font-weight: 600; font-size: var(--fs-small); white-space: nowrap; }
@@ -258,7 +259,7 @@ body.solo #unread-only, body.solo .seg, body.solo #kind { display: none; }
 /* The line between them is a handle: a hairline to look at, a wider strip to grab. */
 #divider { flex: none; width: 1px; background: var(--line); position: relative; z-index: 3; cursor: col-resize; }
 #divider::before { content: ""; position: absolute; inset: 0 -4px; }
-#divider:hover, #divider.dragging { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#divider:hover, #divider.dragging { background: var(--accent); box-shadow: var(--focus-field); }
 body.solo #divider { display: none; }
 body:not(.reading) #thread-bar { visibility: hidden; }
 /* a set of conversations the assistant put in the list */
