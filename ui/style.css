@@ -552,26 +552,49 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 .sub.done .who, .sub.done .num { opacity: .55; }
 
 #doctor-dialog { width: min(980px, 95vw); }
-#doctor-rows { display: grid; grid-template-columns: 14px minmax(140px, max-content) 1fr; gap: 9px var(--s3); align-items: baseline; margin-bottom: var(--s4); }
+/* The status rows, grouped by subsystem: on the left, in a fixed column, an icon tile with the
+   subsystem's name and how it is reached; on the right, its rows. Hairlines between groups. */
+#doctor-rows { margin-bottom: var(--s4); }
+.dg { display: grid; grid-template-columns: 190px minmax(0, 1fr); column-gap: var(--s3); padding: 10px 0; border-top: 1px solid var(--line); }
+.dg:first-child { border-top: 0; padding-top: 0; }
+.dg-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.dg-head .tile { flex: none; width: 28px; height: 28px; border-radius: var(--r); background: var(--hover); color: var(--muted);
+                 display: grid; place-items: center; }
+.dg-head .name { font-weight: 600; line-height: 18px; }
+.dg-head .tag { font: var(--fs-key)/1.3 var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 var(--s1); }
+.dg-rows { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; padding-top: 3px; }
+.dr { display: grid; grid-template-columns: 9px minmax(120px, 230px) minmax(0, 1fr); column-gap: 10px; align-items: baseline; }
 /* the dot sits on the first line of what it is about */
-#doctor-rows .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); align-self: start; margin-top: 6px; }
-#doctor-rows .dot.ok { background: var(--ok); }
-#doctor-rows .dot.warn { background: var(--warn); }
-#doctor-rows .dot.bad { background: var(--danger); }
-#doctor-rows .dot.off { background: none; border: 1.5px solid var(--muted); }
-#doctor-rows .dot.busy { background: var(--accent); animation: working var(--t-spin) ease-in-out infinite; }
-#doctor-rows .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
-#doctor-rows .said { color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
-#doctor-rows .said b { color: var(--ink); font-weight: 500; }
-#doctor-rows .said button { height: var(--control-h-sm); padding: 0 var(--s2); font-size: var(--fs-caption); margin-left: 2px; }
+.dr .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); align-self: start; margin-top: 6px; }
+.dr .dot.ok { background: var(--ok); }
+.dr .dot.warn { background: var(--warn); }
+.dr .dot.bad { background: var(--danger); }
+.dr .dot.off { background: none; border: 1.5px solid var(--muted); }
+.dr .dot.busy { background: var(--accent); animation: late var(--t-busy) step-end, working var(--t-spin) ease-in-out var(--t-busy) infinite; }
+.dr .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr .said { color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; min-width: 0; }
+.dr .said b { color: var(--ink); font-weight: 500; }
+.dr .said button { height: var(--control-h-sm); padding: 0 var(--s2); font-size: var(--fs-caption); margin-left: 2px; }
+.dr .said .path { font: var(--fs-mono)/18px var(--mono); }
 /* what went wrong, exactly as it was reported */
-#doctor-rows .said .bad { color: var(--danger); font: var(--fs-mono)/18px var(--mono); }
+.dr .said .bad { color: var(--danger); font: var(--fs-mono)/18px var(--mono); }
+/* disk use as one bar split into its parts, darkest first, and what each shade is */
+.dr .bar { display: flex; gap: 1px; height: var(--s2); margin: var(--s2) 0 6px; border-radius: var(--r-sm); overflow: hidden; }
+.dr .bar span { min-width: 2px; }
+.dr .legend { display: flex; flex-wrap: wrap; gap: var(--s1) 14px; align-items: center; }
+.dr .legend .item { white-space: nowrap; }
+.dr .legend i { display: inline-block; width: 9px; height: 9px; border-radius: var(--r-sm); margin-right: 6px; }
+.dr .p1 { background: color-mix(in srgb, var(--ink) 72%, var(--panel)); }
+.dr .p2 { background: color-mix(in srgb, var(--ink) 48%, var(--panel)); }
+.dr .p3 { background: color-mix(in srgb, var(--ink) 32%, var(--panel)); }
+.dr .p4 { background: color-mix(in srgb, var(--ink) 20%, var(--panel)); }
+.dr .p5 { background: color-mix(in srgb, var(--ink) 11%, var(--panel)); }
 #doctor-bar { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); flex-wrap: wrap; }
 #doctor-bar h3 { margin: 0 auto 0 0; font-size: var(--fs-subtitle); line-height: 22px; }
 #doctor-bar .toggle { font-size: var(--fs-small); }
 #doctor-problems-row { display: flex; align-items: center; gap: 6px; margin: 0; }
 #doctor-problems-row input { width: auto; margin: 0; }
-#doctor-log { height: min(42vh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg);
+#doctor-log { height: min(30vh, 320px); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg);
   padding: 6px 0; font: var(--fs-mono)/18px var(--mono); }
 #doctor-log:focus-visible { box-shadow: none; outline: 2px solid var(--accent); outline-offset: -2px; }
 #doctor-log .ln { display: grid; grid-template-columns: 62px 150px 1fr 62px; gap: 0 10px; padding: 1px 10px; white-space: nowrap; }

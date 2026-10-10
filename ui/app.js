@@ -45,6 +45,11 @@ const ICONS = {
   unverified: '<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.2 6.4a1.9 1.9 0 1 1 2.6 1.8c-.5.3-.8.6-.8 1.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9"/>',
   failed: '<path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.4v3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9"/>',
   person: '<circle cx="8" cy="5.2" r="2.7"/><path d="M2.8 14c.4-3 2.5-4.7 5.2-4.7s4.800 1.700 5.200 4.700z"/>',
+  mail: '<path d="M1.5 3.5h13v9h-13z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M1.5 4l6.5 5 6.5-5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
+  spark: '<path d="M8 1.5l1.3 3.800a2 2 0 0 0 1.300 1.300l3.800 1.300-3.800 1.300a2 2 0 0 0-1.300 1.300L8 14.300l-1.300-3.800a2 2 0 0 0-1.300-1.300L1.600 7.900l3.800-1.300a2 2 0 0 0 1.300-1.300z"/>',
+  plug: '<path d="M5.500 1.500v3.500M10.500 1.500v3.500M3.500 5h9v2.500a4.500 4.500 0 0 1-9 0zM8 12v2.500" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  search: '<circle cx="7" cy="7" r="4.500" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.500 10.500l3.500 3.500" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  disk: '<ellipse cx="8" cy="4" rx="5.500" ry="2.200" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2.500 4v8c0 1.200 2.500 2.200 5.500 2.200s5.500-1 5.500-2.200V4M2.500 8c0 1.200 2.500 2.200 5.500 2.200s5.500-1 5.500-2.200" fill="none" stroke="currentColor" stroke-width="1.4"/>',
   save: '<path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function icon(name) {
@@ -1049,25 +1054,40 @@ const ago = ms => {
   return s < 45 ? tx("just now") : s < 3600 ? f.format(-Math.round(s / 60), "minute") : s < 86400 ? f.format(-Math.round(s / 3600), "hour") : f.format(-Math.round(s / 86400), "day");
 };
 const secs = ms => (ms / 1000).toLocaleString(LOCALE, { maximumFractionDigits: ms < 10000 ? 2 : 0 }) + " s";
-/** One row of the top table: a coloured dot, a name, and sentences about it. */
+/** A group of status rows for one subsystem: an icon tile, its name and how it is reached in a
+ *  fixed column on the left, its rows on the right. */
+function doctorGroup(box, glyph, name, tag) {
+  const group = el("div", "dg"), head = el("div", "dg-head"), tile = el("span", "tile"), rows = el("div", "dg-rows");
+  tile.append(icon(glyph));
+  const label = el("div", "what");
+  label.append(el("div", "name", name), el("span", "tag", tag));
+  head.append(tile, label);
+  group.append(head, rows);
+  box.append(group);
+  return rows;
+}
+/** One status row: a coloured dot, a name, and what there is to say about it. */
 function doctorRow(box, state, name, parts) {
   const said = el("div", "said");
   parts.filter(Boolean).forEach((p, i) => {
     if (i) said.append(" · ");
-    said.append(typeof p === "string" ? p : p);
+    said.append(p);
   });
   const dot = el("span", "dot " + state);
   dot.title = { ok: tx("Working"), warn: tx("Working, with something to look at"), bad: tx("Not working"), busy: tx("Checking…"), off: tx("Not in use") }[state];
-  box.append(dot, el("div", "name", name), said);
+  const row = el("div", "dr");
+  row.append(dot, el("div", "name", name), said);
+  box.append(row);
+  return said;
 }
 const bad = text => el("span", "bad", text);
 function showDoctor(d) {
-  const box = $("#doctor-rows");
-  box.textContent = "";
+  const box = el("div");
+  const mail = doctorGroup(box, "mail", tx("Mail"), "IMAP");
   for (const a of d.accounts) {
     const c = a.check, failed = c?.state === "failed";
     const state = c?.state === "running" ? "busy" : failed || a.last_error ? "bad" : !a.watching || a.waiting ? "warn" : "ok";
-    doctorRow(box, state, a.email, [
+    doctorRow(mail, state, a.email, [
       c?.state === "running" ? tx("Signing in…") : failed ? bad(tx("Couldn't sign in: {why}", { why: txServer(c.detail) }))
         : c?.state === "ok" ? tx("Signed in to Gmail in {time}", { time: secs(c.ms) }) : "",
       a.last_error && bad(tx("Last sync failed: {why}", { why: txServer(a.last_error) })),
@@ -1078,33 +1098,42 @@ function showDoctor(d) {
       a.waiting ? txn(a.waiting, "{n} change waiting to reach Gmail", "{n} changes waiting to reach Gmail") : "",
     ]);
   }
-  if (!d.accounts.length) doctorRow(box, "off", "Gmail", [tx("No accounts yet.")]);
+  if (!d.accounts.length) doctorRow(mail, "off", "Gmail", [tx("No accounts yet.")]);
+
   const m = d.model, host = m.endpoint.replace(/^https?:\/\//, "");
   const mState = !m.has_key ? "off" : m.check?.state === "running" ? "busy" : m.check?.state === "failed" || (m.last && !m.last.ok && !m.check) ? "bad" : m.check?.state === "ok" || m.last?.ok ? "ok" : "off";
-  doctorRow(box, mState, tx("Assistant"), !m.has_key ? [tx("No API key yet, so the assistant is off.")] : [
+  doctorRow(doctorGroup(box, "spark", tx("Assistant"), "HTTP"), mState, host, !m.has_key ? [tx("No API key yet, so the assistant is off.")] : [
     m.check?.state === "running" ? tx("Asking the model for one word…") : m.check?.state === "failed" ? bad(txServer(m.check.detail))
       : m.check?.state === "ok" ? tx("The model answered in {time}", { time: secs(m.check.ms) }) : "",
-    host, m.model,
+    m.model,
     m.last && (m.last.ok ? tx("last answered {when}", { when: ago(m.last.at) }) : tx("last request failed {when}", { when: ago(m.last.at) })),
   ]);
+
   const o = d.mcp;
-  doctorRow(box, o.requests ? "ok" : "off", tx("Other assistants (MCP)"), o.requests ? [
-    o.client || tx("an assistant"), txn(o.requests, "{n} request", "{n} requests"), tx("last heard from {when}", { when: ago(o.last) }),
+  doctorRow(doctorGroup(box, "plug", tx("Other assistants"), "MCP"), o.requests ? "ok" : "off", o.requests ? o.client || tx("an assistant") : tx("None connected"), o.requests ? [
+    txn(o.requests, "{n} request", "{n} requests"), tx("last heard from {when}", { when: ago(o.last) }),
   ] : [tx("Nothing has connected since Unibox started."), o.helper ? tx("The helper for Claude Desktop is installed.") : ""]);
-  doctorRow(box, d.sync.activity || d.sync.syncing ? "busy" : "ok", tx("This PC"), [
-    d.sync.activity ? txServer(d.sync.activity) : d.sync.syncing ? tx("Syncing…") : tx("Idle"),
-    d.store.search_ready ? tx("search index ready") : tx("search index being built"),
-  ]);
-  showDisk(box, d.disk);
+
+  const building = !d.store.search_ready || /search index/i.test(d.sync.activity || "");
+  doctorRow(doctorGroup(box, "search", tx("Search index"), tx("local")), building ? "busy" : "ok", tx("Full text of all mail"),
+    [building ? tx("search index being built") : tx("search index ready")]);
+
+  showDisk(doctorGroup(box, "disk", tx("Disk"), tx("local")), d.disk);
+  // Drawn afresh only when something it says has changed, so a pulsing dot is not restarted
+  // by every poll.
+  const live = $("#doctor-rows");
+  if (live.innerHTML !== box.innerHTML) live.replaceChildren(...box.childNodes);
 }
 const fmtBig = n => n < 1073741824 ? fmtSize(n) : (n / 1073741824).toLocaleString(LOCALE, { maximumFractionDigits: 2 }) + " GB";
+/** What the app keeps on this PC: the total, then a bar splitting it into its parts with a
+ *  legend, where the two parts that can be let go carry the button that does it. */
 function showDisk(box, k) {
-  if (!k) return doctorRow(box, "busy", tx("Disk space"), [tx("Measuring…")]);
-  const folder = el("span", "", k.folder);
+  if (!k) return doctorRow(box, "busy", tx("Local data"), [tx("Measuring…")]);
+  const said = doctorRow(box, "ok", tx("Local data"), [el("b", "", tx("{size} in all", { size: fmtBig(k.total) })), el("span", "path", k.folder)]);
   // downloaded copies of conversations that have left the inbox can go: Gmail still has them
-  const held = el("span", "", tx("downloaded messages {size} ({n})", { size: fmtBig(k.bodies), n: fmtNum(k.bodies_count) }) + " ");
+  let trim = null, clear = null;
   if (k.spare_count && k.spare > 1048576) {
-    const trim = el("button", "quiet", doctor.trimming ? tx("Removing…") : tx("Remove archived…"));
+    trim = el("button", "", doctor.trimming ? tx("Removing…") : tx("Remove archived…"));
     trim.disabled = !!doctor.trimming;
     trim.title = tx("Remove the downloaded copies of conversations that are no longer in the inbox. They stay in Gmail.");
     trim.onclick = async () => {
@@ -1116,12 +1145,12 @@ function showDisk(box, k) {
       doctor.trimming = false;
       if (done) toast(txn(done.removed, "Removed the downloaded copy of {n} message.", "Removed the downloaded copies of {n} messages."));
     };
-    held.append(trim);
   }
   // the window's cache is only copies of what it fetched (pictures in mail, mostly): safe to drop
-  const cache = el("span", "", tx("cache {size}", { size: fmtBig(k.window) }) + " ");
   if (window.ipc && k.window > 20 * 1048576) {
-    const clear = el("button", "quiet", tx("Clear"));
+    const clearing = Date.now() - (doctor.clearing || 0) < 8000;
+    clear = el("button", "", clearing ? tx("Clearing…") : tx("Clear"));
+    clear.disabled = clearing;
     clear.title = tx("Delete the pictures and pages the window has kept from the web. They are fetched again when needed.");
     clear.onclick = () => {
       window.ipc.postMessage("clear-cache");
@@ -1130,18 +1159,29 @@ function showDisk(box, k) {
       doctor.clearing = Date.now();
       setTimeout(() => api("/api/doctor", { method: "POST" }).catch(() => {}), 2500);   // measure again
     };
-    if (Date.now() - (doctor.clearing || 0) < 8000) { clear.disabled = true; clear.textContent = tx("Clearing…"); }
-    cache.append(clear);
   }
-  doctorRow(box, "ok", tx("Disk space"), [
-    el("b", "", tx("{size} in all", { size: fmtBig(k.total) })),
-    held,
-    tx("message list {size} ({n})", { size: fmtBig(k.list), n: fmtNum(k.list_count) }),
-    tx("search index {size}", { size: fmtBig(k.search) }),
-    cache,
-    k.rest > 1048576 && tx("other {size}", { size: fmtBig(k.rest) }),
-    folder,
-  ]);
+  const parts = [
+    [tx("Messages"), k.bodies, fmtNum(k.bodies_count), trim],
+    [tx("Window cache"), k.window, "", clear],
+    [tx("Search index"), k.search, "", null],
+    [tx("Message list"), k.list, fmtNum(k.list_count), null],
+    [tx("Other"), k.rest, "", null],
+  ].filter(p => p[1] > 0);
+  const whole = parts.reduce((n, p) => n + p[1], 0) || 1;
+  const bar = el("div", "bar"), legend = el("div", "legend");
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", parts.map(p => `${p[0]} ${fmtBig(p[1])}`).join(", "));
+  parts.forEach(([name, bytes, count, button], i) => {
+    const piece = el("span", "p" + (i + 1));
+    piece.style.flexGrow = bytes / whole;
+    piece.title = `${name} · ${fmtBig(bytes)}`;
+    bar.append(piece);
+    const item = el("span", "item");
+    item.append(el("i", "p" + (i + 1)), name + " ", el("b", "", fmtBig(bytes)), count ? ` (${count})` : "");
+    if (button) item.append(" ", button);
+    legend.append(item);
+  });
+  said.append(bar, legend);
 }
 const doctorShows = l => (!doctor.show || l.channel === doctor.show) && (!doctor.problems || !l.ok);
 function doctorLine(l) {
