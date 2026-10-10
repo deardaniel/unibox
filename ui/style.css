@@ -513,7 +513,10 @@ dialog[open] { display: flex; flex-direction: column; max-height: calc(100vh - 2
 dialog[open] > * { flex: none; }
 dialog > form:only-child { display: contents; }   /* a dialog that is one form lays out the form's parts */
 dialog :is(.scroll, .body, #subs-list, #doctor-log) { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-dialog .scroll { margin-right: calc(-1 * var(--s2)); padding-right: var(--s2); }   /* room for the scrollbar, clear of the content */
+/* A scrolling box clips at its edge. It reaches a little past its content on every side, so a
+   ring around something at the edge (the chosen swatch, a focused field) is not cut off, and the
+   scrollbar sits clear of the content. */
+dialog .scroll { margin: calc(-1 * var(--s1)) calc(-1 * var(--s2)); padding: var(--s1) var(--s2); }
 dialog::backdrop { background: var(--scrim); }
 dialog h2 { margin: 0 0 10px; font-size: var(--fs-title); line-height: 28px; font-weight: 600; }
 dialog p { color: var(--muted); margin: 0 0 14px; }
