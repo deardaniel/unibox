@@ -860,6 +860,54 @@ function unsubscribeButton(m) {
   return b;
 }
 
+// ---- the app's colour ------------------------------------------------------------
+// One colour, picked by the person, from which the style sheet shades everything (--pick).
+// It is kept for next time, shared with other open windows, and the window's own icon and
+// the page icon are redrawn in it.
+const PURPLE = "#5b2ee8";
+const COLOURS = [PURPLE, "#3b4fe0", "#1a73e8", "#0b8a8f", "#1e8e3e", "#c77700", "#e8590c", "#d93025", "#d6338a", "#55585e"];
+const pickedColour = () => (/^#[0-9a-f]{6}$/i.test(store.get("accent") || "") ? store.get("accent").toLowerCase() : PURPLE);
+function applyColour(hex) {
+  document.documentElement.style.setProperty("--pick", hex);
+  // the shade the light theme actually uses, as #rrggbb, for the icons
+  const c = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d");
+  c.fillStyle = hex;
+  c.fillStyle = `oklch(from ${hex} clamp(0.38, l, 0.58) c h)`;   // ignored where unsupported
+  c.fillRect(0, 0, 1, 1);
+  const shade = "#" + [...c.getImageData(0, 0, 1, 1).data.slice(0, 3)].map(v => v.toString(16).padStart(2, "0")).join("");
+  const link = document.querySelector('link[rel="icon"]');
+  if (link) link.href = link.href.replace(/fill='%23[0-9a-f]{6}'/i, `fill='%23${shade.slice(1)}'`);
+  window.ipc?.postMessage("accent:" + shade);
+}
+function setColour(hex) {
+  store.set("accent", hex);
+  applyColour(hex);
+  showColour();
+}
+function showColour() {
+  const hex = pickedColour();
+  for (const b of $("#swatches").children) b.classList.toggle("on", b.dataset.c === hex);
+  $("#colour-any").value = hex;
+  if (document.activeElement !== $("#colour-hex")) $("#colour-hex").value = hex;
+}
+applyColour(pickedColour());
+addEventListener("storage", e => { if (e.key === "accent") { applyColour(pickedColour()); showColour(); } });
+for (const c of COLOURS) {
+  const b = el("button");
+  b.dataset.c = c;
+  b.style.background = c;
+  b.title = c === PURPLE ? "Purple (the original)" : c;
+  b.onclick = () => setColour(c);
+  $("#swatches").append(b);
+}
+$("#colour-any").oninput = e => setColour(e.target.value.toLowerCase());
+$("#colour-hex").oninput = e => { const v = e.target.value.trim().toLowerCase(); if (/^#?[0-9a-f]{6}$/.test(v)) setColour(v.startsWith("#") ? v : "#" + v); };
+$("#colour-reset").onclick = () => setColour(PURPLE);
+$("#colour-done").onclick = () => $("#colour-dialog").close();
+const openColour = () => { showColour(); $("#colour-dialog").showModal(); };
+$("#brand .logo").onclick = openColour;
+$("#brand .logo").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openColour(); } };
+
 // ---- subscriptions -------------------------------------------------------------
 /** Every sender whose mail says how to unsubscribe, with how much it sends, and the buttons
  *  to do something about it: unsubscribe, look at its mail, clear it out of the inbox. */

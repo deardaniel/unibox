@@ -1,6 +1,11 @@
 :root {
   --bg: #f6f5f2; --panel: #fff; --ink: #1c1c1c; --muted: #6b6b6b; --line: #e4e2dd;
-  --hover: #f0eee9; --cursor: #5b2ee8; --accent: #5b2ee8; --unread-bg: #fff; --read-bg: #f3f2ee;
+  --hover: #f0eee9; --unread-bg: #fff; --read-bg: #f3f2ee;
+  /* The one colour everything else is shaded from. The person picks it (click the U); the app
+     keeps its hue and vividness and only reins in its brightness, so that it reads on white
+     here and on black in the dark theme below. */
+  --pick: #5b2ee8;
+  --accent: oklch(from var(--pick) clamp(0.38, l, 0.58) c h); --cursor: var(--accent);
   --danger: #c0392b; --ok: #2e7d4f; --warn: #a86400; --rail: 50px;
   --tint: color-mix(in srgb, var(--accent) 11%, var(--panel));   /* behind something switched on */
   color-scheme: light dark;
@@ -8,7 +13,8 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #131313; --panel: #000; --ink: #ececec; --muted: #9a9a9a; --line: #2a2a2a;
-    --hover: #1f1f1f; --cursor: #a48bff; --accent: #a48bff; --unread-bg: #1a1a1a; --read-bg: #101010;
+    --hover: #1f1f1f; --unread-bg: #1a1a1a; --read-bg: #101010;
+    --accent: oklch(from var(--pick) clamp(0.70, calc(l + 0.26), 0.80) calc(c * 0.68) h);
     --danger: #ff7b6b; --ok: #5fbf8a; --warn: #e0a84a;
   }
   /* Emails are light-only HTML: flip the frame, and its images get flipped back from inside. */
@@ -46,7 +52,7 @@ kbd { font: 12px/1 ui-monospace, Consolas, monospace; border: 1px solid var(--li
 #side .acct:hover .rm { display: revert; }
 #side .acct:hover .pw { display: grid; }
 #brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; padding: 2px 6px 12px; }
-#brand .logo { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; flex: none;
+#brand .logo { cursor: pointer; width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; flex: none;
                display: grid; place-items: center; font-size: 15px; }
 #accounts { display: flex; flex-direction: column; gap: 1px; }
 .acct { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
@@ -327,6 +333,16 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
                white-space: nowrap; pointer-events: none; }
 #link-status.lie { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; }
 #trust-dialog { width: min(560px, 92vw); }
+#colour-dialog { width: min(420px, 92vw); }
+#swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+#swatches button { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid var(--panel); outline: 1px solid var(--line); }
+#swatches button.on { outline: 2px solid var(--ink); }
+#colour-any-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; color: var(--muted); font-size: 13px; }
+#colour-any { display: block; width: 44px; height: 30px; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+#colour-hex { display: block; width: 96px; margin: 0; font: 13px "Cascadia Mono", Consolas, ui-monospace, monospace; }
+#colour-sample { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+#colour-sample > * { height: 30px; pointer-events: none; }
+#colour-sample .token { max-width: none; padding-right: 8px; }
 #subs-dialog { width: min(820px, 94vw); }
 #subs-note { font-size: 13px; }
 #subs-list { max-height: min(64vh, 660px); overflow-y: auto; margin: 0 -8px 12px; }

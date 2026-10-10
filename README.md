@@ -30,7 +30,8 @@ triage: replying opens the conversation in Gmail.
   expand and collapse them all, `n`/`p` step through.
 - A long message reopens where you had scrolled to, also after a restart.
 - Attachments preview in place. A conversation can be opened in a window of its own.
-- Dark mode follows Windows.
+- Dark mode follows Windows. Click the U in the corner to choose the app's colour: any
+  colour, shaded to suit light and dark.
 
 **What it tells you about a message**
 

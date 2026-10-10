@@ -708,6 +708,8 @@ mod window {
         Open(String),
         Title(WindowId, String),
         Close(WindowId),
+        /// The colour the person picked for the app, for the window's icon.
+        Accent(WindowId, [u8; 3]),
         /// The unread badge for the taskbar button, as (side, RGBA pixels); `None` clears it.
         Badge(WindowId, Option<(u32, Vec<u8>)>),
     }
@@ -725,8 +727,19 @@ mod window {
         send(UserEvent::Open(url));
     }
 
-    /// The app icon, drawn here so the binary needs no image files: an envelope on a purple tile.
-    fn icon() -> Option<Icon> {
+    /// The app's colour until the person picks another.
+    const PURPLE: [u8; 3] = [0x5b, 0x2e, 0xe8];
+
+    /// "#rrggbb" as its three bytes.
+    fn parse_colour(hex: &str) -> Option<[u8; 3]> {
+        let hex = hex.strip_prefix('#').filter(|h| h.len() == 6 && h.is_ascii())?;
+        let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+        Some([byte(0)?, byte(2)?, byte(4)?])
+    }
+
+    /// The app icon, drawn here so the binary needs no image files: an envelope on a tile of
+    /// the app's colour.
+    fn icon(tile: [u8; 3]) -> Option<Icon> {
         const N: i32 = 64;
         let dist = |px: f32, py: f32, a: (f32, f32), b: (f32, f32)| {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
@@ -746,10 +759,10 @@ mod window {
                 let (cx, cy) = (px.clamp(13.0, 51.0), py.clamp(13.0, 51.0));
                 let inside = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt() <= 13.0;
                 let on_line = strokes.iter().any(|(p, q)| dist(px, py, *p, *q) <= 2.0);
-                rgba.extend_from_slice(match (inside, on_line) {
-                    (false, _) => &[0, 0, 0, 0],
-                    (true, true) => &[255, 255, 255, 255],
-                    (true, false) => &[0x5b, 0x2e, 0xe8, 255],
+                rgba.extend_from_slice(&match (inside, on_line) {
+                    (false, _) => [0, 0, 0, 0],
+                    (true, true) => [255, 255, 255, 255],
+                    (true, false) => [tile[0], tile[1], tile[2], 255],
                 });
             }
         }
@@ -785,7 +798,7 @@ mod window {
             .with_title("Unibox")
             .with_inner_size(LogicalSize::new(size.0, size.1))
             .with_min_inner_size(LogicalSize::new(560.0, 400.0))
-            .with_window_icon(icon())
+            .with_window_icon(icon(PURPLE))
             .with_visible(visible)
             .build(target)?;
         let id = window.id();
@@ -808,8 +821,8 @@ mod window {
                 target.starts_with(&origin) || target.starts_with("about:") || target.starts_with("data:")
             })
             .with_document_title_changed_handler(move |title| send(UserEvent::Title(id, title)))
-            // The page asks to be closed with window.ipc.postMessage("close"), and sets the
-            // taskbar badge with "badge:…". Only the app's own pages are listened to.
+            // The page asks to be closed with window.ipc.postMessage("close"), sets the taskbar
+            // badge with "badge:…" and the icon's colour with "accent:#rrggbb". Only the app's own pages are listened to.
             .with_ipc_handler(move |request| {
                 if !request.uri().to_string().starts_with(&app) {
                     return;
@@ -818,6 +831,8 @@ mod window {
                     send(UserEvent::Close(id));
                 } else if let Some(Ok(badge)) = request.body().strip_prefix("badge:").map(parse_badge) {
                     send(UserEvent::Badge(id, badge));
+                } else if let Some(colour) = request.body().strip_prefix("accent:").and_then(parse_colour) {
+                    send(UserEvent::Accent(id, colour));
                 }
             })
             .build(&window)?;
@@ -928,6 +943,11 @@ mod window {
                 Event::UserEvent(UserEvent::Title(id, title)) => {
                     if let Some((_, w)) = windows.get(&id) {
                         w.set_title(&title);
+                    }
+                }
+                Event::UserEvent(UserEvent::Accent(id, colour)) => {
+                    if let Some((_, w)) = windows.get(&id) {
+                        w.set_window_icon(icon(colour));
                     }
                 }
                 Event::UserEvent(UserEvent::Badge(id, badge)) if id == main_id => {
