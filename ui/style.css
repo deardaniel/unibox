@@ -95,31 +95,31 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 #side { position: fixed; inset: 0 auto 0 0; width: var(--rail); z-index: 5; overflow: hidden;
         display: flex; flex-direction: column; gap: 2px; padding: 10px 6px;
         background: var(--bg); border-right: 1px solid var(--line); white-space: nowrap;
-        transition: width .12s ease, box-shadow .12s ease; }
-#side:hover, #side:focus-within { width: 250px; box-shadow: 6px 0 24px rgba(0,0,0,.18); transition-delay: .12s; }
+        transition: width var(--t-rail) ease, box-shadow var(--t-rail) ease; }
+#side:hover, #side:focus-within { width: 250px; box-shadow: var(--shadow-float); transition-delay: var(--t-rail); }
 #side .label, #side .name, #side .rm, #side .pw { display: none; }
 #side:hover .label, #side:hover .name,
 #side:focus-within .label, #side:focus-within .name { display: revert; }
 /* The remove button only takes up room on the row being pointed at, so the counts line up. */
 #side .acct:hover .rm { display: revert; }
 #side .acct:hover .pw { display: grid; }
-#brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; padding: 2px 6px 12px; }
-#brand .logo { cursor: pointer; width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; flex: none;
-               display: grid; place-items: center; font-size: 15px; }
+#brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: var(--fs-subtitle); padding: 2px 6px var(--s3); }
+#brand .logo { cursor: pointer; width: 26px; height: 26px; border-radius: var(--r); background: var(--accent); color: var(--on-accent); flex: none;
+               display: grid; place-items: center; font-size: var(--fs-subtitle); }
 #accounts { display: flex; flex-direction: column; gap: 1px; }
-.acct { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
-        border: 0; background: none; text-align: left; width: 100%; min-height: 31px; }
+.acct { display: flex; align-items: center; gap: 7px; padding: 6px var(--s2); border-radius: var(--r); cursor: pointer;
+        border: 0; background: none; text-align: left; width: 100%; height: auto; min-height: var(--control-h); }
 .acct:hover { background: var(--hover); }
 .acct.on { background: var(--hover); font-weight: 600; }
-#accounts.sorting .acct[data-id] { transition: transform .14s ease; }
-#accounts.sorting .acct.dragging { transition: none; background: var(--hover); box-shadow: 0 2px 10px rgba(0,0,0,.25);
+#accounts.sorting .acct[data-id] { transition: transform var(--t-rail) ease; }
+#accounts.sorting .acct.dragging { transition: none; background: var(--hover); box-shadow: var(--shadow-float);
                                    cursor: grabbing; position: relative; z-index: 1; }
-#accounts.sorting .acct.dragging.settling { transition: transform .14s ease; }
+#accounts.sorting .acct.dragging.settling { transition: transform var(--t-rail) ease; }
 #accounts.sorting .acct:not(.dragging) { pointer-events: none; background: none; }
 .acct[data-id] { touch-action: none; }
 .acct .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--c); }
 .acct .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.acct .n { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; font-size: 12px; }
+.acct .n { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; font-size: var(--fs-caption); }
 #side:hover .acct .n, #side:focus-within .acct .n { order: 3; font-size: inherit; }
 .acct .rm { color: var(--muted); padding: 0 2px; order: 4; }
 .acct .rm:hover { color: var(--danger); }
@@ -129,21 +129,21 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 .acct.err .name { color: var(--danger); }
 .acct.err .dot { outline: 2px solid var(--danger); outline-offset: 1px; }
 #add { color: var(--muted); margin-top: 6px; }
-#add .plus { width: 9px; text-align: center; flex: none; font-size: 16px; line-height: 1; }
+#add .plus { width: 9px; text-align: center; flex: none; font-size: var(--fs-subtitle); line-height: 1; }
+#subs { color: var(--muted); }
+#subs .plus { width: 13px; display: grid; place-items: center; flex: none; }
 /* Collapsed, everything in the rail sits on one centre line: the logo, then each account as
    a pill in its colour holding the unread count (a plain dot when there is nothing unread). */
 #side:not(:hover):not(:focus-within) :is(#brand, .acct) { justify-content: center; padding-left: 0; padding-right: 0; }
 #side:not(:hover):not(:focus-within) .acct:not(.zero) .dot { display: none; }
 #side:not(:hover):not(:focus-within) .acct .n:not(:empty) {
-  min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; display: grid; place-items: center;
-  background: var(--c); color: #fff; font-size: 11.5px; font-weight: 600; }
-#status { margin-top: auto; padding: 8px 8px 0; color: var(--muted); font-size: 12px; white-space: normal; }
-#activity { padding: 2px 8px 0; color: var(--muted); font-size: 12px; white-space: normal; opacity: .8; }
+  min-width: 22px; height: 22px; padding: 0 6px; border-radius: var(--control-h); display: grid; place-items: center;
+  background: var(--c); color: var(--paper); font-size: var(--fs-caption); font-weight: 600; }
+#status { margin-top: auto; padding: var(--s2) var(--s2) 0; color: var(--muted); font-size: var(--fs-caption); white-space: normal; }
+#activity { padding: 2px var(--s2) 0; color: var(--muted); font-size: var(--fs-caption); white-space: normal; opacity: .8; }
 #activity::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
-  background: var(--accent); vertical-align: 1px; animation: working 1.6s ease-in-out infinite; }
+  background: var(--accent); vertical-align: 1px; animation: working var(--t-pulse) ease-in-out infinite; }
 @keyframes working { 50% { opacity: .25; } }
-#subs { color: var(--muted); }
-#subs .plus { width: 13px; display: grid; place-items: center; flex: none; }
 
 /* ---- main ---- */
 main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: column; min-width: 0; }
