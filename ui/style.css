@@ -69,6 +69,9 @@
   color-scheme: light dark;
   --av-1: #5b8def; --av-2: #e0723c; --av-3: #3fae7a; --av-4: #b667d6;
   --av-5: #c9961a; --av-6: #d8587e; --av-7: #4aa8b8; --av-8: #8a7f6a;
+  /* the colours offered in the Appearance dialog, after the default (--pick) */
+  --swatch-2: #3b4fe0; --swatch-3: #1a73e8; --swatch-4: #0b8a8f; --swatch-5: #1e8e3e; --swatch-6: #c77700;
+  --swatch-7: #e8590c; --swatch-8: #d93025; --swatch-9: #d6338a; --swatch-10: #55585e;
 }
 @media (prefers-color-scheme: dark) {
   /* Emails are light-only HTML: flip the frame, and its images get flipped back from inside. */

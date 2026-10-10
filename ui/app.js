@@ -93,7 +93,9 @@ const fmtSize = n => n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + 
 const WEBMAIL = new Set(("gmail.com googlemail.com yahoo.com yahoo.co.jp yahoo.co.uk ymail.com outlook.com outlook.jp "
   + "hotmail.com hotmail.co.jp live.com live.jp msn.com icloud.com me.com mac.com aol.com proton.me protonmail.com "
   + "docomo.ne.jp ezweb.ne.jp au.com softbank.ne.jp i.softbank.jp nifty.com eircom.net").split(" "));
-const AV_COLORS = ["#5b8def", "#e0723c", "#3fae7a", "#b667d6", "#c9961a", "#d8587e", "#4aa8b8", "#8a7f6a"];
+/** A colour or size from the style sheet's tokens (ui/style.css :root): script holds none of its own. */
+const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const AV_COLORS = [1, 2, 3, 4, 5, 6, 7, 8].map(i => token("--av-" + i));
 const icons = new Map(Object.entries(JSON.parse(store.get("icons:" + BUILD) || "{}")));  // domain -> url or ""
 const iconLookups = new Map();
 
@@ -165,10 +167,10 @@ function taskbarBadge(n) {
   if (!n) return window.ipc.postMessage("badge:");
   const s = Math.max(16, Math.min(64, Math.round(16 * devicePixelRatio)));
   const c = Object.assign(document.createElement("canvas"), { width: s, height: s }), g = c.getContext("2d");
-  g.fillStyle = "#d92d20";
+  g.fillStyle = token("--danger");
   // a little smaller than the slot Windows gives it, like other apps' badges
   g.beginPath(); g.arc(s / 2, s / 2, s * 0.4, 0, 2 * Math.PI); g.fill();
-  g.fillStyle = "#fff";
+  g.fillStyle = token("--on-strong");
   if (n > 99) { g.beginPath(); g.arc(s / 2, s / 2, s * 0.15, 0, 2 * Math.PI); g.fill(); }
   else {
     const text = String(n);
@@ -206,7 +208,7 @@ function renderAccounts() {
     nav.append(b);
   };
   const unread = state.accounts.reduce((n, a) => n + a.unread, 0);
-  item(null, tx("All inboxes"), "#77736b", unread);
+  item(null, tx("All inboxes"), "var(--muted)", unread);
   taskbarBadge(unread);
   for (const a of state.accounts) item(a.id, a.email, a.color, a.unread, a);
 
@@ -481,7 +483,7 @@ function rowNode(i) {
     + (state.selected.has(key(t)) ? " sel" : "") + (state.open?.key === key(t) ? " open" : ""));
   const av = avatar(t.from_name, t.from_addr);
   const dot = el("span", "who-dot");
-  dot.style.background = account(t.account_id)?.color || "gray";
+  dot.style.background = account(t.account_id)?.color || "var(--muted)";
   av.append(dot);
   av.title = account(t.account_id)?.email || "";
   const who = el("span", "who", t.senders || tx("(unknown)"));
@@ -866,8 +868,10 @@ function unsubscribeButton(m) {
 // One colour, picked by the person, from which the style sheet shades everything (--pick).
 // It is kept for next time, shared with other open windows, and the window's own icon and
 // the page icon are redrawn in it.
-const PURPLE = "#5b2ee8";
-const COLOURS = [PURPLE, "#3b4fe0", "#1a73e8", "#0b8a8f", "#1e8e3e", "#c77700", "#e8590c", "#d93025", "#d6338a", "#55585e"];
+// The default is the style sheet's own --pick, read before anything overrides it; the other
+// colours on offer are tokens too.
+const PURPLE = token("--pick").toLowerCase();
+const COLOURS = [PURPLE, ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => token("--swatch-" + i))];
 const pickedColour = () => (/^#[0-9a-f]{6}$/i.test(store.get("accent") || "") ? store.get("accent").toLowerCase() : PURPLE);
 function applyColour(hex) {
   document.documentElement.style.setProperty("--pick", hex);
@@ -985,7 +989,7 @@ async function openSubscriptions() {
     const av = avatar(r.from_name, r.from_addr);
     if (state.accounts.length > 1) {
       const dot = el("span", "who-dot");
-      dot.style.background = account(r.account_id)?.color || "gray";
+      dot.style.background = account(r.account_id)?.color || "var(--muted)";
       av.append(dot);
       av.title = account(r.account_id)?.email || "";
     }
