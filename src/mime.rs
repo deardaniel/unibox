@@ -128,6 +128,15 @@ pub struct Summary {
     pub automated: bool,
 }
 
+/// What a message's headers alone say about it (person or system, how to unsubscribe, the
+/// real sender behind a group), for mail whose body has not been downloaded: the facts as
+/// JSON, and whether a system sent it. The headers must include those in `sync::INDEX_ITEMS`.
+pub fn header_facts(headers: &[u8]) -> Option<(String, bool)> {
+    let msg = MessageParser::default().parse(headers)?;
+    let f = crate::facts::facts(&msg, headers);
+    Some((serde_json::to_string(&f).ok()?, f.automated))
+}
+
 pub fn summarize(raw: &[u8]) -> Summary {
     let Some(msg) = MessageParser::default().parse(raw) else {
         return Summary { snippet: String::new(), text: String::new(), attachments: "[]".into(), facts: "{}".into(), automated: true };

@@ -156,20 +156,25 @@ fn public_https(url: &str) -> bool {
 pub fn unsubscribe_now(raw: &[u8]) -> anyhow::Result<String> {
     let msg = MessageParser::default().parse(raw).ok_or_else(|| anyhow::anyhow!("unreadable message"))?;
     let u = unsubscribe(&msg).filter(|u| u.one_click).ok_or_else(|| anyhow::anyhow!("This sender offers no one-click unsubscribe."))?;
-    if !public_https(&u.url) {
+    unsubscribe_post(&u.url)?;
+    Ok(msg.from().and_then(|a| a.first()).and_then(|a| a.address()).unwrap_or_default().to_lowercase())
+}
+
+/// The one-click request itself, to the address a message gave for it.
+pub fn unsubscribe_post(url: &str) -> anyhow::Result<()> {
+    if !public_https(url) {
         anyhow::bail!("The unsubscribe address in this message doesn't look like a public website.");
     }
     // no redirects: the sender named this address, and nothing else gets the request
     let agent = ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(20)).build();
-    match agent.post(&u.url).set("Content-Type", "application/x-www-form-urlencoded").send_string("List-Unsubscribe=One-Click") {
-        Ok(_) => {}
+    match agent.post(url).set("Content-Type", "application/x-www-form-urlencoded").send_string("List-Unsubscribe=One-Click") {
+        Ok(_) => Ok(()),
         Err(ureq::Error::Status(code, _)) => anyhow::bail!("The sender's site answered {code}."),
         Err(e) => {
             eprintln!("unsubscribe: {e}");
             anyhow::bail!("Couldn't reach the sender's site.")
         }
     }
-    Ok(msg.from().and_then(|a| a.first()).and_then(|a| a.address()).unwrap_or_default().to_lowercase())
 }
 
 fn unsubscribe(msg: &Message) -> Option<Unsubscribe> {

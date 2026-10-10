@@ -348,8 +348,19 @@ async fn same_source(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<Js
 async fn unsubscribe(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api<StatusCode> {
     let logger = app.clone();
     blocking(move || {
-        let raw = app.db.raw_body(id)?.ok_or_else(|| anyhow::anyhow!("That message isn't stored yet."))?;
-        let sender = facts::unsubscribe_now(&raw)?;
+        // from the message itself when it is held, otherwise from what its headers said
+        let sender = match app.db.raw_body(id)? {
+            Some(raw) => facts::unsubscribe_now(&raw)?,
+            None => {
+                let (sender, said) = app.db.message_facts(id)?.ok_or_else(|| anyhow::anyhow!("No such message."))?;
+                let u = &said["unsubscribe"];
+                if u["one_click"] != true {
+                    anyhow::bail!("This sender offers no one-click unsubscribe.");
+                }
+                facts::unsubscribe_post(u["url"].as_str().unwrap_or_default())?;
+                sender.to_lowercase()
+            }
+        };
         app.log(&format!("unsubscribed from {sender}"));
         app.db.mark_unsubscribed(&sender)
     })

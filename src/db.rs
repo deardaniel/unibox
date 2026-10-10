@@ -36,6 +36,9 @@ fn search_terms(query: &str) -> Option<String> {
     Some(words.iter().map(|w| format!("\"{}\"", w.replace('"', "\"\""))).collect::<Vec<_>>().join(" "))
 }
 
+/// Bump when listing All Mail starts to record more about each message, to have it listed again.
+const ALL_MAIL_LISTING: &str = "2";
+
 /// The part of an account's All Mail folder that is listed locally: every message with a
 /// UID from `low` to `high`. `low` works its way down to 1. `swept` is when read/star marks
 /// and deletions were last checked across the whole of it.
@@ -49,7 +52,9 @@ pub struct AllMail {
 impl AllMail {
     fn parse(v: &str) -> Option<AllMail> {
         let mut n = v.split(',');
-        Some(AllMail { low: n.next()?.parse().ok()?, high: n.next()?.parse().ok()?, swept: n.next()?.parse().ok()? })
+        let at = AllMail { low: n.next()?.parse().ok()?, high: n.next()?.parse().ok()?, swept: n.next()?.parse().ok()? };
+        // listed the way an earlier version did: start over, to pick up what it left out
+        (n.next() == Some(ALL_MAIL_LISTING)).then_some(at)
     }
 }
 
@@ -438,7 +443,7 @@ impl Db {
     }
 
     pub fn set_all_mail(&self, account_id: i64, a: &AllMail) -> Result<()> {
-        self.set_meta(&format!("allmail:{account_id}"), &format!("{},{},{}", a.low, a.high, a.swept))
+        self.set_meta(&format!("allmail:{account_id}"), &format!("{},{},{},{ALL_MAIL_LISTING}", a.low, a.high, a.swept))
     }
 
     pub fn thread_messages(&self, account_id: i64, thrid: &str) -> Result<Vec<MessageRow>> {
@@ -548,6 +553,15 @@ impl Db {
             c.execute("UPDATE messages SET from_name=?, from_addr=? WHERE id=?", params![name, addr, message_id])?;
         }
         Ok(())
+    }
+
+    /// A message's sender and the facts worked out about it.
+    pub fn message_facts(&self, message_id: i64) -> Result<Option<(String, serde_json::Value)>> {
+        let c = self.conn()?;
+        let row: Option<(String, Option<String>)> = c
+            .query_row("SELECT from_addr, facts FROM messages WHERE id=?", [message_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        Ok(row.map(|(from, facts)| (from, facts.and_then(|f| serde_json::from_str(&f).ok()).unwrap_or_default())))
     }
 
     // ---- small lists the person builds up ----------------------------------

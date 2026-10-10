@@ -14,6 +14,13 @@ use tokio::sync::broadcast;
 
 const HEADER_ITEMS: &str = "(UID X-GM-MSGID X-GM-THRID FLAGS INTERNALDATE RFC822.SIZE \
                             BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT)])";
+/// What is fetched for each message when All Mail is listed: enough headers to tell who it is
+/// from, whether a person or a system sent it, and how to unsubscribe (see `facts`).
+pub const INDEX_ITEMS: &str = "(UID X-GM-MSGID X-GM-THRID FLAGS INTERNALDATE RFC822.SIZE \
+    BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO LIST-UNSUBSCRIBE LIST-UNSUBSCRIBE-POST \
+    LIST-ID LIST-POST PRECEDENCE AUTO-SUBMITTED FEEDBACK-ID X-MAILER USER-AGENT THREAD-INDEX X-MS-HAS-ATTACH \
+    AUTHENTICATION-RESULTS X-GOOGLE-GROUP-ID X-ORIGINAL-SENDER X-ORIGINAL-FROM X-ORIGINAL-AUTHENTICATION-RESULTS \
+    MAILING-LIST)])";
 const FULL_ITEMS: &str = "(UID X-GM-MSGID X-GM-THRID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])";
 /// Everything in the inbox is downloaded ahead of time, except messages bigger than this,
 /// which load when opened.
@@ -480,7 +487,7 @@ impl App {
 
     /// List the All Mail messages with UIDs `from..=to`. Drafts are left out.
     fn index_range(&self, imap: &mut Imap, account_id: i64, from: u32, to: u32) -> Result<()> {
-        let fetched = imap.uid_fetch(&format!("{from}:{to}"), HEADER_ITEMS)?;
+        let fetched = imap.uid_fetch(&format!("{from}:{to}"), INDEX_ITEMS)?;
         let mut c = self.db.conn()?;
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for f in &fetched {
@@ -490,9 +497,14 @@ impl App {
                 continue;
             }
             insert_fetched(&tx, account_id, f, false)?;
+            // what the headers say about it stands until the whole message is held
+            let (said, automated) = f.get("BODY").and_then(|b| mime::header_facts(b.bytes())).unzip();
             tx.execute(
-                "UPDATE messages SET all_uid=? WHERE account_id=? AND gm_msgid=?",
-                params![uid, account_id, msgid.text()],
+                "UPDATE messages SET all_uid=?1,
+                        facts=CASE WHEN has_body=0 THEN COALESCE(?4, facts) ELSE facts END,
+                        automated=CASE WHEN has_body=0 THEN COALESCE(?5, automated) ELSE automated END
+                  WHERE account_id=?2 AND gm_msgid=?3",
+                params![uid, account_id, msgid.text(), said, automated],
             )?;
         }
         tx.commit()?;
