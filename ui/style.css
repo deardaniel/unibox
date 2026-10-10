@@ -528,27 +528,29 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 .sub.done .who, .sub.done .num { opacity: .55; }
 
 #doctor-dialog { width: min(980px, 95vw); }
-#doctor-rows { display: grid; grid-template-columns: 14px minmax(140px, max-content) 1fr; gap: 9px 12px; align-items: baseline; margin-bottom: 16px; }
-#doctor-rows .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); align-self: center; }
+#doctor-rows { display: grid; grid-template-columns: 14px minmax(140px, max-content) 1fr; gap: 9px var(--s3); align-items: baseline; margin-bottom: var(--s4); }
+/* the dot sits on the first line of what it is about */
+#doctor-rows .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); align-self: start; margin-top: 6px; }
 #doctor-rows .dot.ok { background: var(--ok); }
 #doctor-rows .dot.warn { background: var(--warn); }
 #doctor-rows .dot.bad { background: var(--danger); }
-#doctor-rows .dot.off { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
-#doctor-rows .dot.busy { background: var(--accent); animation: doctor-pulse 1s ease-in-out infinite; }
-@keyframes doctor-pulse { 50% { opacity: .25; } }
+#doctor-rows .dot.off { background: none; border: 1.5px solid var(--muted); }
+#doctor-rows .dot.busy { background: var(--accent); animation: working var(--t-spin) ease-in-out infinite; }
 #doctor-rows .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
-#doctor-rows .said { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+#doctor-rows .said { color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
 #doctor-rows .said b { color: var(--ink); font-weight: 500; }
-#doctor-rows .said button { height: 22px; padding: 0 8px; font-size: 12px; margin-left: 2px; }
-#doctor-rows .said .bad { color: var(--danger); }
-#doctor-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
-#doctor-bar h3 { margin: 0 auto 0 0; font-size: 14px; }
-#doctor-bar .toggle { height: 28px; padding: 0 10px; font-size: 12.5px; }
+#doctor-rows .said button { height: 22px; padding: 0 var(--s2); font-size: var(--fs-caption); margin-left: 2px; }
+/* what went wrong, exactly as it was reported */
+#doctor-rows .said .bad { color: var(--danger); font: var(--fs-mono)/18px var(--mono); }
+#doctor-bar { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); flex-wrap: wrap; }
+#doctor-bar h3 { margin: 0 auto 0 0; font-size: var(--fs-subtitle); line-height: 22px; }
+#doctor-bar .toggle { font-size: var(--fs-small); }
 #doctor-problems-row { display: flex; align-items: center; gap: 6px; margin: 0; }
 #doctor-problems-row input { width: auto; margin: 0; }
-#doctor-log { height: min(42vh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
-  padding: 6px 0; font: 12px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace; }
-#doctor-log .ln { display: grid; grid-template-columns: 62px 150px 1fr 62px; gap: 0 10px; padding: 0 10px; white-space: nowrap; }
+#doctor-log { height: min(42vh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg);
+  padding: 6px 0; font: var(--fs-mono)/18px var(--mono); }
+#doctor-log:focus-visible { box-shadow: none; outline: 2px solid var(--accent); outline-offset: -2px; }
+#doctor-log .ln { display: grid; grid-template-columns: 62px 150px 1fr 62px; gap: 0 10px; padding: 1px 10px; white-space: nowrap; }
 #doctor-log .ln:hover { background: var(--hover); }
 #doctor-log .ln > * { overflow: hidden; text-overflow: ellipsis; }
 #doctor-log .at, #doctor-log .ms { color: var(--muted); }
@@ -558,5 +560,5 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #doctor-log .ln.bad .what, #doctor-log .ln.bad .out { color: var(--danger); }
 #doctor-log .ln.wide { white-space: normal; }
 #doctor-log .ln.wide > * { overflow: visible; overflow-wrap: anywhere; }
-#doctor-log .empty { padding: 24px; text-align: center; color: var(--muted); font: 13px/1.5 inherit; font-family: inherit; }
-#doctor-note { font-size: 12.5px; margin: 8px 0 10px; }
+#doctor-log .empty { padding: var(--s5); text-align: center; color: var(--muted); font: var(--fs-small)/1.5 var(--font); }
+#doctor-note { font-size: var(--fs-small); margin: var(--s2) 0 10px; }
