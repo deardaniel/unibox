@@ -11,6 +11,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
 const BUILD = document.documentElement.dataset.build || "0";
+translatePage();   // the fixed text in index.html, into the language in use (see i18n.js)
 /** How many rendered conversations to keep ready, beyond the one on screen. */
 const KEEP_VIEWS = 10;
 /** In the reading pane a conversation counts as read after it has been up this long. */
@@ -78,11 +79,11 @@ function openExternal(url) {
 
 function fmtDate(ts, long) {
   const d = new Date(ts * 1000), now = new Date();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (long) return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" }) + ", " + time;
+  const time = d.toLocaleTimeString(LOCALE, { hour: "numeric", minute: "2-digit" });
+  if (long) return d.toLocaleDateString(LOCALE, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) + ", " + time;
   if (d.toDateString() === now.toDateString()) return time;
-  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString([], { month: "short", day: "numeric" });
-  return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(LOCALE, { year: "numeric", month: "short", day: "numeric" });
 }
 const fmtSize = n => n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB";
 
@@ -159,7 +160,7 @@ let badged = null;
 function taskbarBadge(n) {
   if (SOLO || n === badged) return;
   badged = n;
-  document.title = n ? `Unibox (${n.toLocaleString()})` : "Unibox";
+  document.title = n ? `Unibox (${fmtNum(n)})` : "Unibox";
   if (!window.ipc) return;
   if (!n) return window.ipc.postMessage("badge:");
   const s = Math.max(16, Math.min(64, Math.round(16 * devicePixelRatio)));
@@ -189,14 +190,14 @@ function renderAccounts() {
     b.style.setProperty("--c", color);
     const dot = el("span", "dot");
     b.append(dot, el("span", "n", unread || ""), el("span", "name", name));
-    b.title = acct ? (acct.last_error ? `${acct.email}: sync problem: ${acct.last_error}` : acct.email) : "All inboxes";
+    b.title = acct ? (acct.last_error ? tx("{email}: sync problem: {error}", { email: acct.email, error: acct.last_error }) : acct.email) : tx("All inboxes");
     if (acct) {
       const rm = el("span", "rm", "×");
-      rm.title = "Remove this account from Unibox";
+      rm.title = tx("Remove this account from Unibox");
       rm.onclick = e => { e.stopPropagation(); removeAccount(acct); };
       const pw = el("span", "pw");
       pw.append(icon("key"));
-      pw.title = "Change the app password";
+      pw.title = tx("Change the app password");
       pw.onclick = e => { e.stopPropagation(); openAccountDialog(acct); };
       b.append(pw, rm);
     }
@@ -205,14 +206,14 @@ function renderAccounts() {
     nav.append(b);
   };
   const unread = state.accounts.reduce((n, a) => n + a.unread, 0);
-  item(null, "All inboxes", "#77736b", unread);
+  item(null, tx("All inboxes"), "#77736b", unread);
   taskbarBadge(unread);
   for (const a of state.accounts) item(a.id, a.email, a.color, a.unread, a);
 
   const errs = state.accounts.filter(a => a.last_error);
   const last = Math.max(0, ...state.accounts.map(a => a.last_sync || 0));
-  $("#status").textContent = errs.length ? `Can't sync ${errs.map(a => a.email).join(", ")}`
-    : last ? "Synced " + fmtDate(last) : state.accounts.length ? "Syncing…" : "";
+  $("#status").textContent = errs.length ? tx("Can't sync {accounts}", { accounts: errs.map(a => a.email).join(", ") })
+    : last ? tx("Synced {when}", { when: fmtDate(last) }) : state.accounts.length ? tx("Syncing…") : "";
 }
 
 // Drag an account up or down the sidebar to reorder it. Nothing moves in the DOM while
@@ -271,7 +272,7 @@ function dragAccount(down, b) {
 }
 
 async function removeAccount(a) {
-  if (!confirm(`Remove ${a.email} from Unibox?\n\nThis deletes the copy of its mail on this PC and the saved app password. Nothing changes in Gmail.`)) return;
+  if (!confirm(tx("Remove {email} from Unibox?\n\nThis deletes the copy of its mail on this PC and the saved app password. Nothing changes in Gmail.", { email: a.email }))) return;
   await api("/api/accounts/" + a.id, { method: "DELETE" });
   if (state.filter === a.id) state.filter = null;
   hideView();
@@ -312,15 +313,15 @@ function showListFilters() {
   $("#unread-only").setAttribute("aria-pressed", state.unreadOnly);
   for (const b of $("#kind").children) b.setAttribute("aria-pressed", b.dataset.kind === state.kind);
   const scope = $("#scope");
-  scope.firstElementChild.textContent = state.all ? "All mail" : "Inbox";
+  scope.firstElementChild.textContent = state.all ? tx("All mail") : tx("Inbox");
   scope.setAttribute("aria-pressed", state.all);
-  scope.title = state.all ? "Looking in all mail, archived and sent too. Click for just the inbox (g then i)"
-    : "Looking in the inbox. Click for all mail, archived and sent too (g then a)";
+  scope.title = state.all ? tx("Looking in all mail, archived and sent too. Click for just the inbox (g then i)")
+    : tx("Looking in the inbox. Click for all mail, archived and sent too (g then a)");
   const box = $("#tokens");
   box.textContent = "";
   const piece = (text, off) => {
     const t = el("span", "token", text), x = el("button", "", "×");
-    x.title = x.ariaLabel = "Remove " + text;
+    x.title = x.ariaLabel = tx("Remove {what}", { what: text });
     x.onclick = e => { e.stopPropagation(); off(); $("#search").focus(); };
     t.append(x);
     box.append(t);
@@ -396,19 +397,19 @@ function renderListFoot() {
   let foot = $("#list-foot");
   if (!foot) { foot = el("div"); foot.id = "list-foot"; }
   $("#list").append(foot);
-  const c = { total: state.threads.length, unread: state.threads.filter(t => t.unread).length }, n = x => x.toLocaleString();
+  const c = { total: state.threads.length, unread: state.threads.filter(t => t.unread).length }, n = fmtNum;
   // what is showing, in words: where, then each filter that is on
-  const where = state.filter == null ? (state.all ? "All mail" : "All inboxes") : (account(state.filter)?.email || "Inbox") + (state.all ? ", all mail" : "");
+  const where = state.filter == null ? (state.all ? tx("All mail") : tx("All inboxes")) : (account(state.filter)?.email || tx("Inbox")) + (state.all ? tx(", all mail") : "");
   const what = state.collection ? state.collection.title
-    : [where, state.q && `“${state.q}”`, state.unreadOnly && "unread only", state.kind === "people" && "from people",
-       state.kind === "automated" && "automated only", state.from && `from ${state.from}`].filter(Boolean).join(" · ");
+    : [where, state.q && `“${state.q}”`, state.unreadOnly && tx("unread only"), state.kind === "people" && tx("from people"),
+       state.kind === "automated" && tx("automated only"), state.from && tx("from {sender}", { sender: state.from })].filter(Boolean).join(" · ");
   // All Mail is listed in the background, newest first; say so while older mail is still coming
   const loading = state.all && !state.collection && state.accounts.some(a => a.indexing && (state.filter == null || a.id === state.filter));
   foot.textContent = "";
   foot.append(el("span", "what", what));
-  foot.append(el("span", "n", `${n(c.total)} conversation${c.total === 1 ? "" : "s"}` + (c.unread && !state.unreadOnly ? ` · ${n(c.unread)} unread` : "")
-    + (loading ? " · still listing older mail…" : "")));
-  if (state.selected.size) foot.append(el("span", "sel", `${n(state.selected.size)} selected`));
+  foot.append(el("span", "n", txn(c.total, "{n} conversation", "{n} conversations") + (c.unread && !state.unreadOnly ? " · " + tx("{n} unread", { n: n(c.unread) }) : "")
+    + (loading ? " · " + tx("still listing older mail…") : "")));
+  if (state.selected.size) foot.append(el("span", "sel", tx("{n} selected", { n: n(state.selected.size) })));
 }
 
 // The whole list is held in memory, but only the rows in view exist as elements: each sits at
@@ -425,7 +426,7 @@ function renderList() {
     const bar = el("div");
     bar.id = "set-bar";
     const back = el("button", "", "✕");
-    back.title = "Back to the inbox";
+    back.title = tx("Back to the inbox");
     back.onclick = () => goInbox();
     bar.append(el("span", "name", state.collection.title), back);
     list.append(bar);
@@ -433,9 +434,9 @@ function renderList() {
   state.cursor = Math.max(0, Math.min(state.cursor, state.threads.length - 1));
   if (!state.threads.length) {
     list.append(el("div", "empty",
-      !state.accounts.length ? "Add a Gmail account to get started."
-        : state.q || state.unreadOnly || state.kind || state.from ? `Nothing in ${state.all ? "all mail" : "the inbox"} matches.`
-        : state.accounts.some(a => !a.last_sync) ? "Fetching your inbox…" : "Inbox zero."));
+      !state.accounts.length ? tx("Add a Gmail account to get started.")
+        : state.q || state.unreadOnly || state.kind || state.from ? (state.all ? tx("Nothing in all mail matches.") : tx("Nothing in the inbox matches."))
+        : state.accounts.some(a => !a.last_sync) ? tx("Fetching your inbox…") : tx("Inbox zero.")));
     renderListFoot();
     return;
   }
@@ -482,11 +483,11 @@ function rowNode(i) {
   dot.style.background = account(t.account_id)?.color || "gray";
   av.append(dot);
   av.title = account(t.account_id)?.email || "";
-  const who = el("span", "who", t.senders || "(unknown)");
+  const who = el("span", "who", t.senders || tx("(unknown)"));
   if (t.people) {
     const p = el("span", "person");
     p.append(icon("person"));
-    p.title = "A person wrote this";
+    p.title = tx("A person wrote this");
     who.prepend(p);
   }
   if (t.count > 1) who.append(el("span", "c", t.count));
@@ -496,8 +497,8 @@ function rowNode(i) {
   if (t.has_attach) marks.append("📎");
   if (t.starred) marks.append(el("span", "star", "★"));
   // in All Mail most things are archived, so there it is the inbox that gets the label
-  if (state.all && !state.collection) { if (t.in_inbox) marks.append(el("span", "gone", "Inbox")); }
-  else if (t.in_inbox === false) marks.append(el("span", "gone", "Archived"));
+  if (state.all && !state.collection) { if (t.in_inbox) marks.append(el("span", "gone", tx("Inbox"))); }
+  else if (t.in_inbox === false) marks.append(el("span", "gone", tx("Archived")));
   const date = el("span", "date");
   date.append(el("span", "d", fmtDate(t.date)));
   row.append(el("span", "bar"), av, who, text, marks, date);
@@ -715,7 +716,7 @@ function renderMessage(v, m, open) {
   const head = el("header");
   // the name may be cut short to fit; the badge after it never is
   const from = el("div", "from");
-  const name = el("span", "name", m.from_name || m.from_addr || "(unknown)");
+  const name = el("span", "name", m.from_name || m.from_addr || tx("(unknown)"));
   if (m.from_name) name.append(el("span", "addr", "  " + m.from_addr));
   from.append(name);
   // Gmail's verdict on whether the sender is who the From line says.
@@ -724,7 +725,7 @@ function renderMessage(v, m, open) {
   if (tr) {
     const badge = el("button", "trust " + tr.level);
     badge.append(icon(tr.level));
-    badge.title = tr.summary + " Click for details.";
+    badge.title = txServer(tr.summary) + " " + tx("Click for details.");
     badge.onclick = e => { e.stopPropagation(); senderDetails(m); };
     from.append(badge);
   }
@@ -733,15 +734,15 @@ function renderMessage(v, m, open) {
   const top = el("div", "top");
   const more = el("button", "more");
   more.append(icon("more"));
-  more.title = "View as plain text, or see the original message";
+  more.title = tx("View as plain text, or see the original message");
   more.onclick = e => { e.stopPropagation(); messageMenu(more, node, m); };
   top.append(from, el("span", "when", fmtDate(m.date, true)), more);
   const who = el("div", "who");
-  const to = el("div", "to", "to " + [m.to_addrs, m.cc_addrs].filter(Boolean).join(", "));
-  if (group) to.append(el("span", "via", " · via the group " + (group.address || "it was sent to")));
+  const to = el("div", "to", tx("to {people}", { people: [m.to_addrs, m.cc_addrs].filter(Boolean).join(", ") }));
+  if (group) to.append(el("span", "via", " · " + tx("via the group {group}", { group: group.address || tx("it was sent to") })));
   // (a group that rewrites the sender points replies back at the person, which is as it should be)
   if (m.trust?.reply_to && m.trust.reply_to !== group?.sender_addr)
-    to.append(el("span", "replies" + (tr?.level === "verified" ? "" : " warn"), " · replies go to " + m.trust.reply_to));
+    to.append(el("span", "replies" + (tr?.level === "verified" ? "" : " warn"), " · " + tx("replies go to {address}", { address: m.trust.reply_to })));
   const un = unsubscribeButton(m);
   if (un) to.append(" · ", un);
   who.append(top, to, el("div", "meta", m.snippet));
@@ -750,8 +751,8 @@ function renderMessage(v, m, open) {
   node.append(head);
   // Say it in words when something is wrong; a small icon is too easy to miss.
   const problems = [];
-  if (tr?.level === "failed") problems.push(tr.summary);
-  if (m.trust?.name_address && !group?.rewritten) problems.push(`The sender's name shows ${m.trust.name_address}, but this was sent from ${m.from_addr}.`);
+  if (tr?.level === "failed") problems.push(txServer(tr.summary));
+  if (m.trust?.name_address && !group?.rewritten) problems.push(tx("The sender's name shows {shown}, but this was sent from {actual}.", { shown: m.trust.name_address, actual: m.from_addr }));
   if (problems.length) node.append(el("div", "caution", problems.join(" ")));
   node.append(el("div", "content"));
   if (open) fill(node, m);
@@ -767,35 +768,35 @@ async function messageMenu(anchor, node, m) {
   const item = (view, label, available) => {
     const b = el("button", current === view ? "on" : "", label);
     b.disabled = !available;
-    if (!available) b.title = "This message doesn't include one";
+    if (!available) b.title = tx("This message doesn't include one");
     b.onclick = () => { menu.remove(); setMessageView(node, m, view); };
     menu.append(b);
   };
-  item("html", "Formatted", !!parts);
-  item("text", "Plain text", !!parts?.text);
-  item("source", "Original message", !!parts);
+  item("html", tx("Formatted"), !!parts);
+  item("text", tx("Plain text"), !!parts?.text);
+  item("source", tx("Original message"), !!parts);
   // not on your own mail: recognised by the account's address, or (for an alias you send as)
   // by Gmail having recorded no check, which only happens to mail sent from the account
   const mine = state.accounts.some(a => a.email.toLowerCase() === m.from_addr.toLowerCase()) || (m.trust && m.trust.level === "none");
   if (!mine) {
     const from = m.from_name || m.from_addr;
-    const b = el("button", "sep", `Archive everything from ${from}…`);
-    b.title = `Archive every inbox conversation with mail from ${m.from_addr}`;
+    const b = el("button", "sep", tx("Archive everything from {sender}…", { sender: from }));
+    b.title = tx("Archive every inbox conversation with mail from {address}", { address: m.from_addr });
     b.onclick = () => { menu.remove(); archiveAllFrom(m, from); };
     menu.append(b);
   }
   if (m.has_body && current === "html" && !picturesOn(node, m)) {
-    const b = el("button", "sep", "Show pictures");
+    const b = el("button", "sep", tx("Show pictures"));
     b.onclick = () => { menu.remove(); showPictures(node, m); };
     menu.append(b);
   }
   if (m.pictures) {
-    const b = el("button", "sep", "Stop showing this sender's pictures");
+    const b = el("button", "sep", tx("Stop showing this sender's pictures"));
     b.onclick = () => { menu.remove(); alwaysPictures(m, false); };
     menu.append(b);
   }
   if (m.trust) {
-    const b = el("button", "sep", "Sender details…");
+    const b = el("button", "sep", tx("Sender details…"));
     b.onclick = () => { menu.remove(); senderDetails(m); };
     menu.append(b);
   }
@@ -821,32 +822,32 @@ const senderTrust = m => (m.facts?.group?.rewritten ? m.facts.group.trust : m.tr
 function unsubscribeButton(m) {
   const u = m.facts?.unsubscribe;
   if (!u || m.facts.group || m.trust?.level === "failed") return null;
-  const b = el("button", "unsub", m.unsubscribed ? "Unsubscribed" : "Unsubscribe");
+  const b = el("button", "unsub", m.unsubscribed ? tx("Unsubscribed") : tx("Unsubscribe"));
   const who = m.from_name || m.from_addr;
   b.disabled = !!m.unsubscribed;
-  b.title = m.unsubscribed ? "You asked this sender to stop."
-    : u.one_click ? `Tell ${who} to stop sending these. Nothing opens; the request goes straight to the sender.`
-    : u.url ? "Open this sender's unsubscribe page in your browser."
-    : "Open a ready-made unsubscribe email in Gmail, for you to send.";
+  b.title = m.unsubscribed ? tx("You asked this sender to stop.")
+    : u.one_click ? tx("Tell {sender} to stop sending these. Nothing opens; the request goes straight to the sender.", { sender: who })
+    : u.url ? tx("Open this sender's unsubscribe page in your browser.")
+    : tx("Open a ready-made unsubscribe email in Gmail, for you to send.");
   b.onclick = async e => {
     e.stopPropagation();
     if (u.one_click) {
       b.disabled = true;
-      b.textContent = "Unsubscribing…";
+      b.textContent = tx("Unsubscribing…");
       try {
         await api(`/api/message/${m.id}/unsubscribe`, { method: "POST" });
         for (const v of state.views.values()) for (const x of v.messages) if (x.from_addr === m.from_addr) x.unsubscribed = true;
-        b.textContent = "Unsubscribed";
-        b.title = "You asked this sender to stop.";
-        toast(`Unsubscribed from ${who}.`);
+        b.textContent = tx("Unsubscribed");
+        b.title = tx("You asked this sender to stop.");
+        toast(tx("Unsubscribed from {sender}.", { sender: who }));
       } catch (err) {
         b.disabled = false;
-        b.textContent = "Unsubscribe";
-        toast("Couldn't unsubscribe: " + err.message);
+        b.textContent = tx("Unsubscribe");
+        toast(tx("Couldn't unsubscribe: {why}", { why: txServer(err.message) }));
       }
     } else if (u.url) {
       openExternal(u.url);
-      toast("Opened the sender's unsubscribe page in your browser.");
+      toast(tx("Opened the sender's unsubscribe page in your browser."));
     } else {
       // an address to write to: hand Gmail a filled-in message from the right account
       const mail = new URL(u.mailto), a = account(m.account_id ?? state.open?.account_id);
@@ -854,7 +855,7 @@ function unsubscribeButton(m) {
         su: mail.searchParams.get("subject") || "unsubscribe", body: mail.searchParams.get("body") || "unsubscribe" });
       if (a) p.set("authuser", a.email);
       openExternal("https://mail.google.com/mail/?" + p);
-      toast("Opened an unsubscribe email in Gmail. Send it to leave the list.");
+      toast(tx("Opened an unsubscribe email in Gmail. Send it to leave the list."));
     }
   };
   return b;
@@ -914,11 +915,21 @@ function showColour() {
 const pick = change => { Object.assign(picker, change); setColour(hsvToHex(picker.h, picker.s, picker.v)); };
 applyColour(pickedColour());
 addEventListener("storage", e => { if (e.key === "accent") { applyColour(pickedColour()); showColour(); } });
+{
+  // the language: the system's unless one is picked here; the page is redrawn in it
+  const choose = $("#language");
+  choose.append(new Option(tx("Same as Windows"), ""), ...Object.entries(LOCALES).map(([code, name]) => new Option(name, code)));
+  choose.value = store.get("locale") in LOCALES ? store.get("locale") : "";
+  choose.onchange = () => {
+    try { choose.value ? localStorage.setItem("locale", choose.value) : localStorage.removeItem("locale"); } catch {}
+    location.reload();
+  };
+}
 for (const c of COLOURS) {
   const b = el("button");
   b.dataset.c = c;
   b.style.background = c;
-  b.title = c === PURPLE ? "Purple (the original)" : c;
+  b.title = c === PURPLE ? tx("Purple (the original)") : c;
   b.onclick = () => setColour(c);
   $("#swatches").append(b);
 }
@@ -951,24 +962,24 @@ $("#brand .logo").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e
 async function openSubscriptions() {
   const box = $("#subs-list"), dialog = $("#subs-dialog");
   box.textContent = "";
-  box.append(el("div", "empty", "Looking…"));
+  box.append(el("div", "empty", tx("Looking…")));
   if (!dialog.open) dialog.showModal();
   const p = new URLSearchParams();
   if (state.filter != null) p.set("account", state.filter);
-  const rows = await api("/api/subscriptions?" + p).catch(e => (toast(e.message), []));
+  const rows = await api("/api/subscriptions?" + p).catch(e => (toast(txServer(e.message)), []));
   box.textContent = "";
-  if (!rows.length) box.append(el("div", "empty", "No senders with an unsubscribe link yet."));
-  const n = x => x ? x.toLocaleString() : "";
+  if (!rows.length) box.append(el("div", "empty", tx("No senders with an unsubscribe link yet.")));
+  const n = x => x ? fmtNum(x) : "";
   // A table: who, and how much they send. The row itself opens the sender's mail; the two
   // things that change anything sit quietly at the end of it.
   const head = el("div", "sub head");
-  head.append(el("span"), el("span", "", "Sender"), el("span", "num", "Last 3 months"), el("span", "num", "In all"),
-    el("span", "num", "In inbox"), el("span"), el("span"));
+  head.append(el("span"), el("span", "", tx("Sender")), el("span", "num", tx("Last 3 months")), el("span", "num", tx("In all")),
+    el("span", "num", tx("In inbox")), el("span"), el("span"));
   if (rows.length) box.append(head);
   for (const r of rows) {
     const row = el("div", "sub" + (r.unsubscribed ? " done" : ""));
     row.tabIndex = 0;
-    row.title = "Show this sender's mail";
+    row.title = tx("Show this sender's mail");
     const av = avatar(r.from_name, r.from_addr);
     if (state.accounts.length > 1) {
       const dot = el("span", "who-dot");
@@ -984,7 +995,7 @@ async function openSubscriptions() {
     if (r.in_inbox) {
       const b = el("button", "quiet");
       b.append(icon("archive"));
-      b.title = `Archive the ${n(r.in_inbox)} in the inbox from this sender`;
+      b.title = tx("Archive the {n} in the inbox from this sender", { n: n(r.in_inbox) });
       b.onclick = async e => {
         e.stopPropagation();
         if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // said no, or nothing was there
@@ -1024,7 +1035,7 @@ function showPictures(node, m) {
   fill(node, m);
 }
 function alwaysPictures(m, allow) {
-  api("/api/pictures", { body: { sender: m.from_addr, allow } }).catch(e => toast(e.message));
+  api("/api/pictures", { body: { sender: m.from_addr, allow } }).catch(e => toast(txServer(e.message)));
   for (const v of state.views.values()) {
     v.messages.forEach((x, i) => {
       if (x.from_addr !== m.from_addr) return;
@@ -1036,7 +1047,7 @@ function alwaysPictures(m, allow) {
       if (!node.classList.contains("closed")) fill(node, x);
     });
   }
-  toast(allow ? `Pictures from ${m.from_addr} will always be shown.` : `Pictures from ${m.from_addr} are hidden again.`);
+  toast(tx(allow ? "Pictures from {sender} will always be shown." : "Pictures from {sender} are hidden again.", { sender: m.from_addr }));
 }
 
 // ---- events and bookings ---------------------------------------------------------
@@ -1065,13 +1076,13 @@ function eventWhen(e) {
   const day = { weekday: "short", month: "short", day: "numeric", year: "numeric" }, time = { hour: "numeric", minute: "2-digit" };
   if (e.start.all_day) {
     if (end) end = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1);   // the end day is not included
-    const a = start.toLocaleDateString([], day);
-    return end && end > start ? `${a} – ${end.toLocaleDateString([], day)}` : `${a}, all day`;
+    const a = start.toLocaleDateString(LOCALE, day);
+    return end && end > start ? `${a} – ${end.toLocaleDateString(LOCALE, day)}` : tx("{date}, all day", { date: a });
   }
-  const a = `${start.toLocaleDateString([], day)}, ${start.toLocaleTimeString([], time)}`;
+  const a = `${start.toLocaleDateString(LOCALE, day)}, ${start.toLocaleTimeString(LOCALE, time)}`;
   if (!end || end <= start) return a;
-  return start.toDateString() === end.toDateString() ? `${a} – ${end.toLocaleTimeString([], time)}`
-    : `${a} – ${end.toLocaleDateString([], day)}, ${end.toLocaleTimeString([], time)}`;
+  return start.toDateString() === end.toDateString() ? `${a} – ${end.toLocaleTimeString(LOCALE, time)}`
+    : `${a} – ${end.toLocaleDateString(LOCALE, day)}, ${end.toLocaleTimeString(LOCALE, time)}`;
 }
 
 function cardRows(card, rows) {
@@ -1087,18 +1098,18 @@ function cardRows(card, rows) {
 
 function eventCard(e) {
   const card = el("div", "card event" + (e.method === "cancel" ? " cancelled" : ""));
-  card.append(el("div", "kind", { request: "Invitation", cancel: "Cancelled", reply: "Reply to an invitation" }[e.method] || "Event"),
-    el("div", "title", e.summary || "(no title)"));
+  card.append(el("div", "kind", tx({ request: "Invitation", cancel: "Canceled", reply: "Reply to an invitation" }[e.method] || "Event")),
+    el("div", "title", e.summary || tx("(no title)")));
   const name = p => p.name || p.email;
   const mark = { accepted: " ✓", declined: " ✗", tentative: " ?" };
   const going = e.attendees.slice(0, 8).map(p => name(p) + (mark[p.status] || "")).join(", ")
-    + (e.attendees.length > 8 ? `, and ${e.attendees.length - 8} more` : "");
-  const zone = e.start.tz && e.start.tz !== "UTC" && !e.start.all_day ? ` (your time; set in ${e.start.tz})` : "";
-  cardRows(card, [["When", eventWhen(e) + (e.recurs ? ", repeating" : "") + zone], ["Where", e.location],
-    ["Organiser", name(e.organizer)], ["Invited", going]]);
+    + (e.attendees.length > 8 ? tx(", and {n} more", { n: e.attendees.length - 8 }) : "");
+  const zone = e.start.tz && e.start.tz !== "UTC" && !e.start.all_day ? tx(" (your time; set in {zone})", { zone: e.start.tz }) : "";
+  cardRows(card, [[tx("When"), eventWhen(e) + (e.recurs ? tx(", repeating") : "") + zone], [tx("Where"), e.location],
+    [tx("Organizer"), name(e.organizer)], [tx("Invited"), going]]);
   if (e.method === "request") {
-    const b = el("button", "", "Respond in Gmail");
-    b.title = "Open this conversation in Gmail, where you can accept or decline";
+    const b = el("button", "", tx("Respond in Gmail"));
+    b.title = tx("Open this conversation in Gmail, where you can accept or decline");
     b.onclick = () => replyInGmail();
     card.append(b);
   }
@@ -1111,15 +1122,19 @@ function wallTime(v) {
   if (!p) return v;
   const d = new Date(Date.UTC(+p[1], p[2] - 1, +p[3], +(p[4] || 0), +(p[5] || 0)));
   const o = { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", year: "numeric" };
-  return p[4] ? d.toLocaleString([], { ...o, hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString([], o);
+  return p[4] ? d.toLocaleString(LOCALE, { ...o, hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString(LOCALE, o);
 }
 
 function bookingCard(c) {
   const card = el("div", "card");
-  if (c.title) card.append(el("div", "title", c.title));
-  cardRows(card, c.rows.map(r => [r.label, r.time ? wallTime(r.value) : r.value]));
+  if (c.title) card.append(el("div", "title", txServer(c.title)));
+  // "From" and "To" mean different things on a flight, an order and a parcel; say which, for
+  // languages that have different words for them
+  const kind = /^Flight/.test(c.title) ? "flight|" : /^Order/.test(c.title) ? "order|" : c.rows.some(r => r.label === "Carrier") ? "parcel|" : "";
+  const label = l => (kind && (l === "From" || l === "To") ? tx(kind + l) : txServer(l));
+  cardRows(card, c.rows.map(r => [label(r.label), r.time ? wallTime(r.value) : txServer(r.value)]));
   for (const a of c.actions) {
-    const b = el("button", "", a.label);
+    const b = el("button", "", txServer(a.label));
     b.append(el("span", "host", host(a.url)));
     b.title = a.url;
     b.onclick = () => openExternal(a.url);
@@ -1134,36 +1149,35 @@ function senderDetails(m) {
   const t = senderTrust(m) || { level: "none", dkim: [], raw: "" }, d = $("#trust-dialog");
   const words = { pass: "Passed", fail: "Failed", softfail: "Failed (soft)", none: "Not set up by the sender", neutral: "Inconclusive",
     temperror: "Couldn't be checked", permerror: "Sender's record is broken", policy: "Rejected by policy" };
-  const say = r => words[r] || r || "No result";
+  const say = r => (words[r] ? tx(words[r]) : r) || tx("No result");
   const body = d.querySelector(".body");
   body.textContent = "";
   const none = t.level === "none";
   body.append(el("p", "verdict " + t.level, none
-    ? "Gmail recorded no check for this message. That is normal for mail you sent yourself."
-    : t.summary));
+    ? tx("Gmail recorded no check for this message. That is normal for mail you sent yourself.")
+    : txServer(t.summary)));
   const table = el("table");
   const row = (k, v, cls) => { const r = el("tr"); r.append(el("td", "", k), el("td", cls || "", v)); table.append(r); };
-  row("From", m.from_name ? `${m.from_name} <${m.from_addr}>` : m.from_addr);
-  if (m.facts?.why) row("Written by", `${m.facts.automated ? "A system, probably" : "A person, probably"}: it ${m.facts.why}.`);
-  if (group) row("Sent through", `the Google Group ${group.address}` + (group.rewritten ? ". The checks below are the ones the group made on the sender." : ""));
-  if (t.reply_to) row("Replies go to", t.reply_to, "warn");
-  if (t.name_address) row("Name claims", t.name_address, "warn");
+  row(tx("From"), m.from_name ? `${m.from_name} <${m.from_addr}>` : m.from_addr);
+  if (m.facts?.why) row(tx("Written by"), tx(m.facts.automated ? "A system, probably: it {why}." : "A person, probably: it {why}.", { why: txServer(m.facts.why) }));
+  if (group) row(tx("Sent through"), tx("the Google Group {group}", { group: group.address }) + (group.rewritten ? tx(". The checks below are the ones the group made on the sender.") : ""));
+  if (t.reply_to) row(tx("Replies go to"), t.reply_to, "warn");
+  if (t.name_address) row(tx("Name claims"), t.name_address, "warn");
   if (!none) {
     const policy = { none: "the domain asks for failing mail to be delivered anyway", quarantine: "the domain asks for failing mail to be treated as spam",
       reject: "the domain asks for failing mail to be refused" }[t.dmarc_policy];
-    row("DMARC", say(t.dmarc) + (t.dmarc ? (t.dmarc === "fail" && policy ? `; ${policy}` : "") : " (the domain publishes no policy)"),
+    row("DMARC", say(t.dmarc) + (t.dmarc ? (t.dmarc === "fail" && policy ? `; ${tx(policy)}` : "") : tx(" (the domain publishes no policy)")),
       t.dmarc === "fail" && !t.forwarded ? "bad" : "");
-    if (t.forwarded) row("Forwarded", "Yes. It passed these checks where it first arrived.");
-    for (const k of t.dkim) row("DKIM signature", `${say(k.result)}, signed by ${k.domain || "?"}`, k.result === "fail" ? "bad" : "");
-    if (!t.dkim.length) row("DKIM signature", "None");
-    row("SPF", say(t.spf) + (t.spf_domain ? `, for ${t.spf_domain}` : ""), /fail/.test(t.spf) ? "bad" : "");
+    if (t.forwarded) row(tx("Forwarded"), tx("Yes. It passed these checks where it first arrived."));
+    for (const k of t.dkim) row(tx("DKIM signature"), tx("{result}, signed by {domain}", { result: say(k.result), domain: k.domain || "?" }), k.result === "fail" ? "bad" : "");
+    if (!t.dkim.length) row(tx("DKIM signature"), tx("None"));
+    row("SPF", say(t.spf) + (t.spf_domain ? tx(", for {domain}", { domain: t.spf_domain }) : ""), /fail/.test(t.spf) ? "bad" : "");
   }
   body.append(table);
   if (!none) {
-    body.append(el("p", "note", "These are Gmail's own checks, recorded when the message arrived. A pass means the message "
-      + `really came from ${t.domain || "that domain"}; it says nothing about whether that domain is one you should trust, so read it carefully.`));
+    body.append(el("p", "note", tx("These are Gmail's own checks, recorded when the message arrived. A pass means the message really came from {domain}; it says nothing about whether that domain is one you should trust, so read it carefully.", { domain: t.domain || tx("that domain") })));
     const raw = el("details");
-    raw.append(el("summary", "", group?.rewritten ? "The group's record" : "Gmail's record"), el("pre", "", t.raw.replace(/;\s*/g, ";\n  ")));
+    raw.append(el("summary", "", group?.rewritten ? tx("The group's record") : tx("Gmail's record")), el("pre", "", t.raw.replace(/;\s*/g, ";\n  ")));
     body.append(raw);
   }
   d.showModal();
@@ -1181,7 +1195,8 @@ function linkStatus(a) {
   const shown = looksLikeUrl ? host(/^https?:/i.test(text) ? text : "https://" + text) : "";
   const real = /^https?:/i.test(a.href) ? host(a.href) : "";
   const lie = shown && real && shown !== real && !real.endsWith("." + shown) && !shown.endsWith("." + real);
-  bar.textContent = lie ? `Says ${shown} but goes to ${a.href}` : a.href.replace(/^mailto:/i, "Email ");
+  bar.textContent = lie ? tx("Says {shown} but goes to {real}", { shown, real: a.href })
+    : /^mailto:/i.test(a.href) ? tx("Email {address}", { address: a.href.slice(7) }) : a.href;
   bar.classList.toggle("lie", !!lie);
   bar.hidden = false;
 }
@@ -1195,7 +1210,7 @@ function setMessageView(node, m, view) {
 function fill(node, m) {
   const content = node.querySelector(".content");
   if (content.childElementCount) return;
-  if (!m.has_body) { content.append(el("div", "pending", "Loading message…")); return; }
+  if (!m.has_body) { content.append(el("div", "pending", tx("Loading message…"))); return; }
   const f = el("iframe", "body");
   // Same-origin so its height can be measured, but scripts stay off: email code never runs.
   f.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
@@ -1247,11 +1262,11 @@ function fill(node, m) {
   if (view === "html") {
     if (m.facts?.remote_images && !pictures) {
       const bar = el("div", "picbar");
-      const once = el("button", "", "Show"), always = el("button", "", "Always from " + (m.from_name || m.from_addr));
+      const once = el("button", "", tx("Show")), always = el("button", "", tx("Always from {sender}", { sender: m.from_name || m.from_addr }));
       once.onclick = () => showPictures(node, m);
       always.onclick = () => alwaysPictures(m, true);
-      always.title = `Always show pictures in mail from ${m.from_addr}`;
-      bar.append(el("span", "", "Pictures hidden: Gmail couldn't verify this sender."), once, always);
+      always.title = tx("Always show pictures in mail from {address}", { address: m.from_addr });
+      bar.append(el("span", "", tx("Pictures hidden: Gmail couldn't verify this sender.")), once, always);
       content.append(bar);
     }
     // what the message says about itself in a form a program can read, unless it may be forged
@@ -1276,7 +1291,7 @@ function fill(node, m) {
       }
       const dl = el("button", "dl");
       dl.append(icon("save"));
-      dl.title = "Save to Downloads";
+      dl.title = tx("Save to Downloads");
       dl.onclick = e => { e.stopPropagation(); saveAttachment(m, a); };
       chip.append(el("span", "fn", (a.kind === "image" ? "" : "📎 ") + a.name), el("span", "sz", fmtSize(a.size)), dl);
       chip.onclick = () => openPreview(m, i);
@@ -1291,7 +1306,7 @@ const attachmentUrl = (m, a) => `/api/message/${m.id}/attachment/${a.index}`;
 /** Saved straight into Downloads and shown there; a plain browser download is the fallback. */
 function saveAttachment(m, a) {
   api(attachmentUrl(m, a) + "/save", { method: "POST" })
-    .then(r => toast("Saved to " + r.path))
+    .then(r => toast(tx("Saved to {path}", { path: r.path })))
     .catch(() => {
       const link = el("a");
       link.href = attachmentUrl(m, a);
@@ -1309,7 +1324,7 @@ function openPreview(m, i) {
   box.hidden = false;
   box.querySelector(".name").textContent = a.name;
   box.querySelector(".count").textContent =
-    fmtSize(a.size) + (m.attachments.length > 1 ? ` · ${i + 1} of ${m.attachments.length}` : "");
+    fmtSize(a.size) + (m.attachments.length > 1 ? " · " + tx("{i} of {n}", { i: i + 1, n: m.attachments.length }) : "");
   box.querySelector('[data-pv="prev"]').disabled = i === 0;
   box.querySelector('[data-pv="next"]').disabled = i === m.attachments.length - 1;
   stage.textContent = "";
@@ -1324,11 +1339,11 @@ function openPreview(m, i) {
     f.src = url;
     stage.append(f);
   } else if (a.kind === "text") {
-    const pre = el("pre", "", "Loading…");
+    const pre = el("pre", "", tx("Loading…"));
     stage.append(pre);
-    fetch(url).then(r => r.text()).then(t => (pre.textContent = t)).catch(() => (pre.textContent = "Couldn't load this file."));
+    fetch(url).then(r => r.text()).then(t => (pre.textContent = t)).catch(() => (pre.textContent = tx("Couldn't load this file.")));
   } else {
-    stage.append(el("div", "none", "No preview for this kind of file. Use Save to put it in Downloads."));
+    stage.append(el("div", "none", tx("No preview for this kind of file. Use Save to put it in Downloads.")));
   }
 }
 function closePreview() {
@@ -1392,16 +1407,16 @@ function updateThreadBar() {
   const listed = state.open && state.threads.find(t => key(t) === state.open.key);
   const move = $("#thread-bar [data-act=archive], #thread-bar [data-act=inbox]"), out = listed?.in_inbox === false;
   move.dataset.act = out ? "inbox" : "archive";
-  move.textContent = out ? "Move to inbox" : "Archive";
-  move.title = out ? "Put this conversation back in the inbox" : "Archive (e)";
+  move.textContent = out ? tx("Move to inbox") : tx("Archive");
+  move.title = out ? tx("Put this conversation back in the inbox") : tx("Archive (e)");
   const starred = state.open?.messages.some(m => m.starred);
-  $('#thread-bar [data-act="star"]').textContent = starred ? "★ Starred" : "Star";
+  $('#thread-bar [data-act="star"]').textContent = starred ? tx("★ Starred") : tx("Star");
   // one button opens every message, or closes them again once all are open
   const b = $('#thread-bar [data-act="expand"]'), nodes = [...(state.open?.node.querySelectorAll(".msg") || [])];
   const allOpen = nodes.every(n => !n.classList.contains("closed"));
   b.hidden = nodes.length < 2;
-  b.textContent = allOpen ? "Collapse all" : "Expand all";
-  b.title = allOpen ? "Close every message but the last (:)" : "Open every message in this conversation (;)";
+  b.textContent = allOpen ? tx("Collapse all") : tx("Expand all");
+  b.title = allOpen ? tx("Close every message but the last (:)") : tx("Open every message in this conversation (;)");
 }
 
 /** Open every message of the conversation on screen, or close all but the last. */
@@ -1504,7 +1519,7 @@ function act(op, list = targets(), { record = true } = {}) {
     }
     // the server answers with the messages it changed, which is what an undo needs
     const sent = api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } })
-      .catch(e => { overrides.delete(k); refreshSoon(); toast("That didn't go through: " + e.message); return null; })
+      .catch(e => { overrides.delete(k); refreshSoon(); toast(tx("That didn't go through: {why}", { why: txServer(e.message) })); return null; })
       .finally(() => settled(k));
     if (!undoing) lastAction.items.push({ t: row || t, index, sent });
   }
@@ -1516,11 +1531,11 @@ function act(op, list = targets(), { record = true } = {}) {
 const INVERSE = { read: "unread", unread: "read", star: "unstar", unstar: "star", inbox: "archive" };
 async function undo() {
   const last = lastAction;
-  if (!last) return toast("Nothing to undo.");
+  if (!last) return toast(tx("Nothing to undo."));
   lastAction = null;
   if (last.op !== "archive") {
     act(INVERSE[last.op], last.items.map(i => i.t), { record: false });
-    return toast("Undone.");
+    return toast(tx("Undone."));
   }
   // Put the rows back where they were straight away, then tell the server.
   for (const { t, index } of [...last.items].sort((a, b) => a.index - b.index)) {
@@ -1532,12 +1547,12 @@ async function undo() {
   updateThreadBar();
   const first = last.items[0];
   if (first) { setCursor(state.threads.findIndex(x => key(x) === key(first.t))); show(first.t); }
-  toast(last.items.length > 1 ? `${last.items.length} conversations back in the inbox.` : "Back in the inbox.");
+  toast(txn(last.items.length, "Back in the inbox.", "{n} conversations back in the inbox."));
   for (const { t, sent } of last.items) {
     const done = await sent;   // the archive request itself has to have landed first
     if (!done?.msgids?.length) continue;
     api("/api/unarchive", { body: { account_id: t.account_id, msgids: done.msgids } })
-      .catch(e => { toast("Couldn't undo: " + e.message); refreshSoon(); });
+      .catch(e => { toast(tx("Couldn't undo: {why}", { why: txServer(e.message) })); refreshSoon(); });
   }
 }
 
@@ -1557,13 +1572,13 @@ function archive() {
 
 /** Clear out everything in the inbox from one sender. One z brings it all back. */
 async function archiveAllFrom(m, from) {
-  const rows = await api(`/api/message/${m.id}/same-source`).catch(e => (toast(e.message), []));
+  const rows = await api(`/api/message/${m.id}/same-source`).catch(e => (toast(txServer(e.message)), []));
   if (!rows.length) return false;
-  if (rows.length > 1 && !confirm(`Archive ${rows.length} conversations from ${from} (${m.from_addr})?`)) return false;
+  if (rows.length > 1 && !confirm(tx("Archive {n} conversations from {sender} ({address})?", { n: fmtNum(rows.length), sender: from, address: m.from_addr }))) return false;
   const wasOpen = rows.some(t => key(t) === state.open?.key);
   act("archive", rows);
   if (wasOpen) leaveConversation();
-  toast(rows.length > 1 ? `Archived ${rows.length} conversations from ${from}.` : "Archived.");
+  toast(rows.length > 1 ? tx("Archived {n} conversations from {sender}.", { n: fmtNum(rows.length), sender: from }) : tx("Archived."));
   return true;
 }
 
@@ -1645,7 +1660,7 @@ function goInbox() {
 function selectAll(on) {
   state.selected = new Set(on ? state.threads.map(key) : []);
   renderList();
-  if (on) toast(`${state.selected.size} conversations selected. Esc to clear.`);
+  if (on) toast(tx("{n} conversations selected. Esc to clear.", { n: fmtNum(state.selected.size) }));
 }
 // Space, PageUp/PageDown, Home and End always move the open conversation, wherever focus is,
 // so j/k can pick one and the same hand can read it.
@@ -1774,7 +1789,7 @@ function drawSuggest() {
   box.hidden = !suggest.items.length;
   let senders = false;
   suggest.items.forEach((it, i) => {
-    if (it.sender && !senders) { senders = true; box.append(el("div", "group", "Senders")); }
+    if (it.sender && !senders) { senders = true; box.append(el("div", "group", tx("Senders"))); }
     const row = el("div", "opt" + (i === suggest.at ? " at" : ""));
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", i === suggest.at);
@@ -1784,7 +1799,7 @@ function drawSuggest() {
     row.onpointerdown = e => { e.preventDefault(); takeSuggestion(i); };
     box.append(row);
   });
-  if (suggest.items.length) box.append(el("div", "keys", "↑↓ choose   Tab take   Esc close"));
+  if (suggest.items.length) box.append(el("div", "keys", tx("↑↓ choose   Tab take   Esc close")));
 }
 async function updateSuggest() {
   const field = $("#search");
@@ -1792,7 +1807,7 @@ async function updateSuggest() {
   const word = field.selectionStart === field.value.length ? (/(?:^|\s)(\S+)$/.exec(field.value)?.[1] || "") : "";
   const lower = word.toLowerCase();
   if (!/^(is|in|from):/.test(lower)) return closeSuggest();
-  const fixed = FILTER_WORDS.filter(([w]) => w.startsWith(lower) && w !== lower).map(([w, hint]) => ({ word: w, hint }));
+  const fixed = FILTER_WORDS.filter(([w]) => w.startsWith(lower) && w !== lower).map(([w, hint]) => ({ word: w, hint: tx(hint) }));
   // Until the senders for what is typed now arrive, keep the ones already showing that still
   // fit, so the list narrows in place as letters are added and never blinks shut.
   const typed = lower.slice(5);
@@ -1807,7 +1822,7 @@ async function updateSuggest() {
   const found = await api("/api/senders?" + new URLSearchParams({ q: word.slice(5) })).catch(() => []);
   if (asked !== suggest.asked || $("#search").value !== field.value || document.activeElement !== field) return;
   const chosen = suggest.items[suggest.at]?.word;
-  suggest.items = [...fixed, ...found.map(f => ({ word: "from:" + f.addr, name: (f.name || "").toLowerCase(), hint: f.name && f.name.toLowerCase() !== f.addr ? f.name : `${f.n.toLocaleString()} message${f.n === 1 ? "" : "s"}`, sender: true }))];
+  suggest.items = [...fixed, ...found.map(f => ({ word: "from:" + f.addr, name: (f.name || "").toLowerCase(), hint: f.name && f.name.toLowerCase() !== f.addr ? f.name : txn(f.n, "{n} message", "{n} messages"), sender: true }))];
   suggest.at = Math.max(0, suggest.items.findIndex(it => it.word === chosen));
   drawSuggest();
 }
@@ -1856,7 +1871,8 @@ const sync = { syncing: true, next: 0, every: 120 };
 function renderSync() {
   // background work, said quietly under the sync time while it lasts
   const doing = $("#activity");
-  if (doing.textContent !== (sync.activity || "")) { doing.textContent = sync.activity || ""; doing.hidden = !sync.activity; }
+  const busyWith = txServer(sync.activity || "");
+  if (doing.textContent !== busyWith) { doing.textContent = busyWith; doing.hidden = !busyWith; }
   const left = Math.max(0, sync.next - Date.now() / 1000);
   // a countdown that has run out means the next pass is about to start
   const busy = sync.syncing || left === 0;
@@ -1869,9 +1885,9 @@ function renderSync() {
   // Otherwise the border fills as the wait runs down; while syncing it is empty and the arrow spins.
   b.style.setProperty("--p", busy || live ? 0 : Math.min(1, 1 - (left - 1) / sync.every));
   const s = Math.ceil(left);
-  b.title = busy ? "Syncing: checking Gmail for new mail and changes"
-    : live ? "Connected to Gmail: new mail shows up as it arrives. Click to check now."
-    : `Next automatic check in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}. Click to check now.`;
+  b.title = busy ? tx("Syncing: checking Gmail for new mail and changes")
+    : live ? tx("Connected to Gmail: new mail shows up as it arrives. Click to check now.")
+    : tx("Next automatic check in {time}. Click to check now.", { time: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` });
 }
 function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
@@ -1893,8 +1909,8 @@ function openAccountDialog(acct) {
   form.dataset.change = acct ? acct.email : "";
   form.email.value = acct ? acct.email : "";
   form.email.readOnly = !!acct;
-  $("#add-title").textContent = acct ? "Change app password" : "Add a Gmail account";
-  $("#add-submit").textContent = acct ? "Save password" : "Add account";
+  $("#add-title").textContent = acct ? tx("Change app password") : tx("Add a Gmail account");
+  $("#add-submit").textContent = acct ? tx("Save password") : tx("Add account");
   $("#add-error").textContent = "";
   $("#add-dialog").showModal();
   if (acct) form.password.focus();
@@ -1910,21 +1926,21 @@ $("#add-form").addEventListener("submit", async e => {
   e.preventDefault();
   const form = e.target, btn = $("#add-submit");
   btn.disabled = true;
-  btn.textContent = "Checking with Gmail…";
+  btn.textContent = tx("Checking with Gmail…");
   $("#add-error").textContent = "";
   try {
     await api("/api/accounts", { body: { email: form.email.value, password: form.password.value } });
     form.reset();
     $("#add-dialog").close();
-    toast(form.dataset.change ? "App password changed. Syncing…" : "Account added. Fetching the inbox…");
+    toast(form.dataset.change ? tx("App password changed. Syncing…") : tx("Account added. Fetching the inbox…"));
     refresh();
   } catch (err) {
     $("#add-error").textContent = /login failed/i.test(err.message)
-      ? "Gmail rejected that address and app password. Check both and try again."
+      ? tx("Gmail rejected that address and app password. Check both and try again.")
       : err.message;
   }
   btn.disabled = false;
-  btn.textContent = form.dataset.change ? "Save password" : "Add account";
+  btn.textContent = form.dataset.change ? tx("Save password") : tx("Add account");
 });
 
 // ---- assistant ---------------------------------------------------------------
@@ -1991,14 +2007,14 @@ function renderAssistant() {
   if (setup) {
     const f = $("#as-setup");
     if (!f.dataset.filled) { f.model.value = d.model; f.base_url.value = d.base_url; f.dataset.filled = "1"; }
-    f.api_key.placeholder = d.configured ? "(saved; leave empty to keep it)" : "sk-ant-…";
+    f.api_key.placeholder = d.configured ? tx("(saved; leave empty to keep it)") : "sk-ant-…";
     f.querySelector('[data-as="cancel-setup"]').hidden = !d.configured;
   }
   if (!d.messages.length && !setup) {
     const hint = el("div", "hint");
-    hint.append(el("b", "", "Ask about your mail, or tell it what to do."),
-      "“Find all my delivery emails”", el("br"), "“Archive the ones from before this year”", el("br"),
-      "“What did they say about the refund?”", el("br"), "“Draft a reply saying Saturday works”");
+    hint.append(el("b", "", tx("Ask about your mail, or tell it what to do.")),
+      tx("“Find all my delivery emails”"), el("br"), tx("“Archive the ones from before this year”"), el("br"),
+      tx("“What did they say about the refund?”"), el("br"), tx("“Draft a reply saying Saturday works”"));
     log.append(hint);
   }
   for (const m of d.messages) {
@@ -2013,8 +2029,8 @@ function renderAssistant() {
     node.append(richText(m.text));
     if (node.childNodes.length) log.append(node);
   }
-  if (d.busy) log.append(el("div", "as-status", d.status || "Working…"));
-  $("#as-send").textContent = d.busy ? "Stop" : "Send";
+  if (d.busy) log.append(el("div", "as-status", txServer(d.status) || tx("Working…")));
+  $("#as-send").textContent = d.busy ? tx("Stop") : tx("Send");
   if (atEnd || d.busy) log.scrollTop = log.scrollHeight;
 }
 
@@ -2060,7 +2076,7 @@ $("#assistant").addEventListener("click", async e => {
   if (act === "settings") { assistant.setup = !assistant.setup; renderAssistant(); }
   if (act === "cancel-setup") { assistant.setup = false; renderAssistant(); }
   if (act === "new") {
-    if (assistant.data?.messages.length && !confirm("Start a new conversation? The assistant will forget this one.")) return;
+    if (assistant.data?.messages.length && !confirm(tx("Start a new conversation? The assistant will forget this one."))) return;
     api("/api/agent/reset", { method: "POST" }).catch(err => toast(err.message));
   }
 });
@@ -2101,8 +2117,12 @@ function assistantActed({ op, items }) {
       return { t: state.threads[index] || { account_id: i.account_id, thrid: i.thrid }, index, sent: Promise.resolve({ msgids: i.msgids }) };
     }),
   };
-  const what = { archive: "archived", read: "marked read", unread: "marked unread", star: "starred", unstar: "unstarred" }[op];
-  toast(`Assistant ${what} ${items.length} conversation${items.length > 1 ? "s" : ""}.`);
+  const said = { archive: ["Assistant archived {n} conversation.", "Assistant archived {n} conversations."],
+    read: ["Assistant marked {n} conversation read.", "Assistant marked {n} conversations read."],
+    unread: ["Assistant marked {n} conversation unread.", "Assistant marked {n} conversations unread."],
+    star: ["Assistant starred {n} conversation.", "Assistant starred {n} conversations."],
+    unstar: ["Assistant unstarred {n} conversation.", "Assistant unstarred {n} conversations."] }[op];
+  toast(txn(items.length, ...said));
   if (op === "archive") {
     for (const { t } of lastAction.items) { const v = state.views.get(key(t)); if (v) dropView(v); }
   }
@@ -2137,7 +2157,7 @@ function listen() {
   const es = new EventSource("/api/events");
   es.onmessage = e => {
     const ev = JSON.parse(e.data);
-    if (ev.kind === "error") return toast(ev.detail);
+    if (ev.kind === "error") return toast(txServer(ev.detail));
     if (ev.kind === "sync") return setSync(JSON.parse(ev.detail));
     if (ev.kind === "agent") return SOLO ? null : loadAssistant();
     if (ev.kind === "agent-show") return SOLO ? null : showCollection(ev.detail);

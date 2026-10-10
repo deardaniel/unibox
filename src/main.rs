@@ -82,6 +82,12 @@ async fn app_js() -> impl IntoResponse {
         asset("app.js", include_str!("../ui/app.js")),
     )
 }
+async fn i18n_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")],
+        asset("i18n.js", include_str!("../ui/i18n.js")),
+    )
+}
 async fn style_css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")],
@@ -640,6 +646,7 @@ fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/app.js", get(app_js))
+        .route("/i18n.js", get(i18n_js))
         .route("/style.css", get(style_css))
         .route("/api/accounts", get(list_accounts).post(add_account))
         .route("/api/accounts/order", post(order_accounts))

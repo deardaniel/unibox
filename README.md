@@ -30,8 +30,9 @@ triage: replying opens the conversation in Gmail.
   expand and collapse them all, `n`/`p` step through.
 - A long message reopens where you had scrolled to, also after a restart.
 - Attachments preview in place. A conversation can be opened in a window of its own.
-- Dark mode follows Windows. Click the U in the corner to choose the app's colour: any
-  colour, shaded to suit light and dark.
+- Dark mode follows Windows. Click the U in the corner to choose the language (American
+  English, British English or Japanese; it follows Windows by default) and the app's colour:
+  any colour, shaded to suit light and dark.
 
 **What it tells you about a message**
 
@@ -175,5 +176,5 @@ Open `http://127.0.0.1:47921/` and add any address with any password (`wrong` is
 | `src/secrets.rs` | Passwords and keys in the Windows Credential Manager |
 | `src/agent.rs` | The assistant: model loop, tools, draft building |
 | `src/mcp.rs` | The same tools for other assistants, over MCP |
-| `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary) |
+| `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary); `i18n.js` holds the translations |
 | `tests/` | The pretend Gmail and Claude servers |

@@ -334,6 +334,9 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 #link-status.lie { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; }
 #trust-dialog { width: min(560px, 92vw); }
 #colour-dialog { width: min(440px, 92vw); }
+#colour-dialog h3 { margin: 4px 0 6px; font-size: 14px; }
+#language-row { display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: 14px; }
+#language { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 #swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 #swatches button { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid var(--panel); outline: 1px solid var(--line); }
 #swatches button.on { outline: 2px solid var(--ink); }
