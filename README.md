@@ -54,7 +54,8 @@ triage: replying opens the conversation in Gmail.
   to the model and every MCP call, with sizes and timings. It tries each connection afresh
   when opened. The record holds no mail and is gone when the app closes. It also says how much
   disk space Unibox uses and on what: downloaded messages, the message list, the search index
-  and the window's cache.
+  and the window's cache, with buttons to clear the cache and to remove the downloaded copies of
+  conversations that have left the inbox (they stay in Gmail and are fetched again when opened).
 
 **Privacy**
 

@@ -185,6 +185,23 @@ fn folder_size(dir: &std::path::Path) -> u64 {
 }
 
 impl App {
+    /// Let go of the downloaded copies of conversations that have left the inbox, and give the
+    /// space back to the disk. Returns how many messages that was.
+    pub fn drop_downloaded(&self) -> anyhow::Result<usize> {
+        let began = Instant::now();
+        let gone = self.db.drop_spare_bodies()?;
+        self.forget_hydrated();
+        // a failure here only means the space is reused later instead of handed back now
+        if let Err(e) = self.db.compact() {
+            self.log(&format!("compacting the mail store failed: {e:#}"));
+        }
+        note("app", "", "Removed downloaded copies of archived conversations", &format!("{gone} messages"), true, Some(began.elapsed()));
+        if let Ok(found) = self.disk_use() {
+            with(|s| s.disk = Some(found));
+        }
+        Ok(gone)
+    }
+
     /// What the app keeps on this PC and how big each part is: the mail store split into what
     /// it holds, and the other files in the data folder. Reads the whole store, so it takes a
     /// moment on a large mailbox.
@@ -205,12 +222,15 @@ impl App {
         let count = |sql: &str| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0);
         let file = |name: &str| std::fs::metadata(self.dir.join(name)).map(|m| m.len()).unwrap_or(0);
         let store = file("mail.db") + file("mail.db-wal") + file("mail.db-shm");
+        let (spare_count, spare) = self.db.spare_bodies()?;
         let window = folder_size(&self.dir.join("webview"));
         let known = [store, window].iter().sum::<u64>();
         Ok(json!({
             "total": folder_size(&self.dir).max(known),
             "bodies": bodies, "bodies_count": count("SELECT COUNT(*) FROM bodies"),
             "list": list, "list_count": count("SELECT COUNT(*) FROM messages"),
+            // downloaded copies of conversations that are no longer in the inbox
+            "spare": spare, "spare_count": spare_count,
             "search": search,
             // free pages, the write-ahead file and the small tables
             "rest": store.saturating_sub(bodies + list + search).max(other),

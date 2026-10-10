@@ -141,6 +141,11 @@ impl App {
         }
     }
 
+    /// Forget which conversations were topped up lately, so the next one opened is checked again.
+    pub(crate) fn forget_hydrated(&self) {
+        self.hydrated.lock().unwrap().clear();
+    }
+
     /// Which accounts have a live IDLE connection right now.
     pub(crate) fn watching(&self) -> HashMap<i64, bool> {
         self.watchers.lock().unwrap().clone()

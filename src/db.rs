@@ -22,6 +22,9 @@ pub struct Account {
     pub indexing: bool,
 }
 
+/// A message `m` in a conversation that has nothing in the inbox any more.
+const SPARE: &str = "NOT EXISTS (SELECT 1 FROM messages i WHERE i.account_id=m.account_id AND i.gm_thrid=m.gm_thrid AND i.in_inbox=1)";
+
 /// Bump to have the search index rebuilt from scratch on the next start.
 const SEARCH_INDEX: &str = "1";
 
@@ -498,6 +501,37 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The downloaded copies that can be let go: messages in conversations with nothing left
+    /// in the inbox. Returns (how many, their size in bytes).
+    pub fn spare_bodies(&self) -> Result<(i64, i64)> {
+        let c = self.conn()?;
+        Ok(c.query_row(&format!("SELECT COUNT(*), COALESCE(SUM(LENGTH(b.raw)), 0) FROM bodies b JOIN messages m ON m.id=b.message_id WHERE {SPARE}"), [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?)
+    }
+
+    /// Drop those copies, keeping what the list and search show (sender, subject, text). Each
+    /// is fetched from Gmail again when its conversation is opened. Returns how many went.
+    pub fn drop_spare_bodies(&self) -> Result<usize> {
+        let mut c = self.conn()?;
+        let tx = c.transaction()?;
+        tx.execute_batch(&format!(
+            "CREATE TEMP TABLE going AS SELECT m.id, m.account_id, m.gm_thrid FROM messages m WHERE m.has_body=1 AND {SPARE};
+             DELETE FROM bodies WHERE message_id IN (SELECT id FROM going);
+             UPDATE messages SET has_body=0 WHERE id IN (SELECT id FROM going);
+             DELETE FROM hydrated WHERE (account_id, gm_thrid) IN (SELECT account_id, gm_thrid FROM going);"
+        ))?;
+        let gone: i64 = tx.query_row("SELECT COUNT(*) FROM going", [], |r| r.get(0))?;
+        tx.execute_batch("DROP TABLE going")?;
+        tx.commit()?;
+        Ok(gone as usize)
+    }
+
+    /// Hand the space freed inside the file back to the disk.
+    pub fn compact(&self) -> Result<()> {
+        Ok(self.conn()?.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?)
+    }
+
     pub fn mark_hydrated(&self, account_id: i64, thrids: &[String]) -> Result<()> {
         let c = self.conn()?;
         for t in thrids {
@@ -850,6 +884,36 @@ mod tests {
         assert!(db.agent_query("SELECT message_id FROM mail WHERE message_id IN (SELECT rowid FROM search WHERE search MATCH '\"refund\"')", 5, 40).is_ok());
         assert!(db.agent_query("ATTACH DATABASE 'x.db' AS x", 5, 40).is_err());
         assert!(db.agent_query("SELECT 1; PRAGMA writable_schema=1", 5, 40).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn downloaded_copies_of_archived_conversations_can_be_dropped() {
+        let dir = std::env::temp_dir().join(format!("unibox-test-spare-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(&dir.join("spare.db")).unwrap();
+        let id = db.add_account("a@example.com").unwrap();
+        let c = db.conn().unwrap();
+        // one archived conversation; one with an earlier archived message and one still in the inbox
+        for (msgid, thrid, inbox) in [("1", "10", false), ("2", "20", false), ("3", "20", true)] {
+            let m = NewMessage {
+                gm_msgid: msgid, gm_thrid: thrid, uid: None, in_inbox: inbox, seen: true, starred: false, date: 1, size: 0,
+                from_name: "A", from_addr: "a@b.example", to_addrs: "", cc_addrs: "", subject: "Hello",
+            };
+            Db::insert_message(&c, id, &m).unwrap();
+            c.execute("INSERT INTO bodies(message_id, raw) SELECT id, x'0102030405' FROM messages WHERE gm_msgid=?", [msgid]).unwrap();
+            c.execute("UPDATE messages SET has_body=1, body_text='kept for search' WHERE gm_msgid=?", [msgid]).unwrap();
+        }
+        assert_eq!(db.spare_bodies().unwrap(), (1, 5));
+        assert_eq!(db.drop_spare_bodies().unwrap(), 1);
+        db.compact().unwrap();
+        let held: Vec<String> = c.prepare("SELECT gm_msgid FROM messages WHERE has_body=1 ORDER BY 1").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(held, ["2", "3"]);
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM bodies", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        // what the list and search go by is still there
+        assert_eq!(c.query_row("SELECT body_text FROM messages WHERE gm_msgid='1'", [], |r| r.get::<_, String>(0)).unwrap(), "kept for search");
+        assert_eq!(db.spare_bodies().unwrap(), (0, 0));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

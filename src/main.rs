@@ -659,6 +659,12 @@ async fn doctor_check(State(app): State<Arc<App>>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
+/// Remove the downloaded copies of conversations that are no longer in the inbox.
+async fn doctor_trim(State(app): State<Arc<App>>) -> Api<Json<serde_json::Value>> {
+    let gone = blocking(move || app.drop_downloaded()).await?;
+    Ok(Json(serde_json::json!({ "removed": gone })))
+}
+
 fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(index))
@@ -688,6 +694,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/agent/config", post(agent_configure))
         .route("/api/agent/collection/clear", post(agent_clear_collection))
         .route("/api/doctor", get(doctor_view).post(doctor_check))
+        .route("/api/doctor/trim", post(doctor_trim))
         .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/message/:id/attachment/:index/preview", get(attachment_preview))

@@ -1083,6 +1083,23 @@ const fmtBig = n => n < 1073741824 ? fmtSize(n) : (n / 1073741824).toLocaleStrin
 function showDisk(box, k) {
   if (!k) return doctorRow(box, "busy", tx("Disk space"), [tx("Measuring…")]);
   const folder = el("span", "", k.folder);
+  // downloaded copies of conversations that have left the inbox can go: Gmail still has them
+  const held = el("span", "", tx("downloaded messages {size} ({n})", { size: fmtBig(k.bodies), n: fmtNum(k.bodies_count) }) + " ");
+  if (k.spare_count && k.spare > 1048576) {
+    const trim = el("button", "quiet", doctor.trimming ? tx("Removing…") : tx("Remove archived…"));
+    trim.disabled = !!doctor.trimming;
+    trim.title = tx("Remove the downloaded copies of conversations that are no longer in the inbox. They stay in Gmail.");
+    trim.onclick = async () => {
+      if (!confirm(tx("Remove the downloaded copies of {n} messages in conversations that are no longer in the inbox ({size})?\n\nThey stay in Gmail and in the list and search here, and are downloaded again when you open them.",
+        { n: fmtNum(k.spare_count), size: fmtBig(k.spare) }))) return;
+      doctor.trimming = true;
+      trim.disabled = true; trim.textContent = tx("Removing…");
+      const done = await api("/api/doctor/trim", { method: "POST" }).catch(e => (toast(txServer(e.message)), null));
+      doctor.trimming = false;
+      if (done) toast(txn(done.removed, "Removed the downloaded copy of {n} message.", "Removed the downloaded copies of {n} messages."));
+    };
+    held.append(trim);
+  }
   // the window's cache is only copies of what it fetched (pictures in mail, mostly): safe to drop
   const cache = el("span", "", tx("cache {size}", { size: fmtBig(k.window) }) + " ");
   if (window.ipc && k.window > 20 * 1048576) {
@@ -1100,7 +1117,7 @@ function showDisk(box, k) {
   }
   doctorRow(box, "ok", tx("Disk space"), [
     el("b", "", tx("{size} in all", { size: fmtBig(k.total) })),
-    tx("downloaded messages {size} ({n})", { size: fmtBig(k.bodies), n: fmtNum(k.bodies_count) }),
+    held,
     tx("message list {size} ({n})", { size: fmtBig(k.list), n: fmtNum(k.list_count) }),
     tx("search index {size}", { size: fmtBig(k.search) }),
     cache,
