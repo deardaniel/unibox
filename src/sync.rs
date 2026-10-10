@@ -56,6 +56,8 @@ pub struct App {
     push_wake: Mutex<Option<mpsc::Sender<()>>>,
     /// (a pass is running, Unix time of the next scheduled pass, seconds between passes)
     status: Mutex<(bool, i64, u64)>,
+    /// Background work worth mentioning while it lasts ("Listing older mail"); empty when none.
+    activity: Mutex<String>,
     pub agent: crate::agent::AgentState,
 }
 
@@ -73,6 +75,7 @@ impl App {
             watchers: Mutex::new(HashMap::new()),
             push_wake: Mutex::new(None),
             status: Mutex::new((true, 0, SYNC_EVERY.as_secs())),
+            activity: Mutex::new(String::new()),
             agent: Default::default(),
         })
     }
@@ -99,7 +102,20 @@ impl App {
     /// What the sync button shows: whether a pass is running and when the next one is due.
     pub fn sync_status(&self) -> serde_json::Value {
         let (syncing, next, every) = *self.status.lock().unwrap();
-        serde_json::json!({ "syncing": syncing, "next": next, "every": every, "live": self.all_watched() })
+        let activity = self.activity.lock().unwrap().clone();
+        serde_json::json!({ "syncing": syncing, "next": next, "every": every, "live": self.all_watched(), "activity": activity })
+    }
+
+    /// Say what the app is busy with in the background, or "" when it has finished.
+    fn set_activity(&self, what: &str) {
+        {
+            let mut now = self.activity.lock().unwrap();
+            if *now == what {
+                return;
+            }
+            *now = what.to_string();
+        }
+        self.emit("sync", &self.sync_status().to_string());
     }
 
     fn set_status(&self, syncing: bool, next: i64, every: u64) {
@@ -198,9 +214,11 @@ impl App {
         *self.wake.lock().unwrap() = Some(tx);
         let app = self.clone();
         std::thread::spawn(move || {
+            app.set_activity("Building the search index…");
             if let Err(e) = app.db.build_search() {
                 app.log(&format!("building the search index: {e:#}"));
             }
+            app.set_activity("");
             app.refresh_summaries();
             // which accounts this pass covers; None means all of them
             let mut only: Option<Vec<i64>> = None;
@@ -230,6 +248,9 @@ impl App {
                 let every = if app.all_watched() { SYNC_EVERY_WATCHED } else { SYNC_EVERY }.as_secs();
                 if only.is_none() || next_full > now + every as i64 {
                     next_full = now + every as i64;
+                }
+                if !more {
+                    app.set_activity("");
                 }
                 if more {
                     // While there is still mail to preload, go straight round again.
@@ -449,6 +470,9 @@ impl App {
             self.index_range(imap, account_id, from, at.low - 1)?;
             at.low = from;
             self.db.set_all_mail(account_id, &at)?;
+            let so_far: i64 =
+                self.db.conn()?.query_row("SELECT COUNT(*) FROM messages WHERE all_uid IS NOT NULL", [], |r| r.get(0))?;
+            self.set_activity(&format!("Listing older mail… {} so far", thousands(so_far)));
             self.emit("indexed", email);
         }
         Ok(at.low > 1)
@@ -920,6 +944,19 @@ fn fetched_flags(f: &Fetched) -> (bool, bool) {
     let flags: Vec<String> =
         f.get("FLAGS").map(|v| v.list().iter().map(|a| a.text().to_ascii_lowercase()).collect()).unwrap_or_default();
     (flags.iter().any(|x| x == "\\seen"), flags.iter().any(|x| x == "\\flagged"))
+}
+
+/// 1234567 as "1,234,567".
+fn thousands(n: i64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, d) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(d);
+    }
+    out
 }
 
 fn is_draft(f: &Fetched) -> bool {

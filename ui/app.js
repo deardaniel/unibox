@@ -1544,6 +1544,9 @@ $("#search").addEventListener("keydown", e => { if (e.key === "Enter") { e.targe
 // The sync button says what the background sync is doing: working, or counting down to the next check.
 const sync = { syncing: true, next: 0, every: 120 };
 function renderSync() {
+  // background work, said quietly under the sync time while it lasts
+  const doing = $("#activity");
+  if (doing.textContent !== (sync.activity || "")) { doing.textContent = sync.activity || ""; doing.hidden = !sync.activity; }
   const left = Math.max(0, sync.next - Date.now() / 1000);
   // a countdown that has run out means the next pass is about to start
   const busy = sync.syncing || left === 0;
