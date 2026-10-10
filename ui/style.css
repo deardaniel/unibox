@@ -69,6 +69,7 @@
   color-scheme: light dark;
   --av-1: #5b8def; --av-2: #e0723c; --av-3: #3fae7a; --av-4: #b667d6;
   --av-5: #c9961a; --av-6: #d8587e; --av-7: #4aa8b8; --av-8: #8a7f6a;
+  --t-busy: 300ms;   /* how long work runs before a spinner or busy dot says so */
   /* the colours offered in the Appearance dialog, after the default (--pick) */
   --swatch-2: #3b4fe0; --swatch-3: #1a73e8; --swatch-4: #0b8a8f; --swatch-5: #1e8e3e; --swatch-6: #c77700;
   --swatch-7: #e8590c; --swatch-8: #d93025; --swatch-9: #d6338a; --swatch-10: #55585e;
@@ -154,6 +155,9 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 #activity::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
   background: var(--accent); vertical-align: 1px; animation: working var(--t-pulse) ease-in-out infinite; }
 @keyframes working { 50% { opacity: .25; } }
+/* A sign of running work stays out of sight for its first --t-busy: most work is done by then. */
+@keyframes late { from { visibility: hidden; } }
+#activity { animation: late var(--t-busy) step-end; }
 
 /* ---- main ---- */
 main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: column; min-width: 0; }
@@ -204,8 +208,8 @@ main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: co
 #top > *, #thread-bar button { height: var(--control-h); }
 /* drawn, not a text glyph: a glyph sits wherever its font puts it, which was not the middle */
 #sync .spin { display: block; }
-#sync.busy .spin { animation: spin var(--t-spin) linear infinite; }
-#sync.busy { color: var(--accent); }
+#sync.busy .spin { animation: spin var(--t-spin) linear var(--t-busy) infinite; }
+#sync.busy { color: var(--accent); transition: color 0s var(--t-busy); }
 @keyframes spin { to { transform: rotate(360deg); } }
 #ask { display: grid; place-items: center; width: var(--control-h); padding: 0; color: var(--accent); }
 #ask.on { background: var(--hover); }
@@ -438,6 +442,7 @@ iframe.body { display: block; width: 100%; height: 120px; border: 0; background:
 .as-status { color: var(--muted); font-size: var(--fs-small); display: flex; align-items: center; gap: 7px; }
 .as-status::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent);
                      border-right-color: transparent; animation: spin var(--t-spin) linear infinite; }
+.as-status.fresh { animation: late var(--t-busy) step-end; }
 .as-error { color: var(--danger); font-size: var(--fs-small); }
 #as-form { display: flex; gap: var(--s2); padding: 10px; border-top: 1px solid var(--line); align-items: flex-end; }
 #as-input { flex: 1; resize: none; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);

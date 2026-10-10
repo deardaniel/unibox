@@ -2212,7 +2212,14 @@ function renderAssistant() {
     node.append(richText(m.text));
     if (node.childNodes.length) log.append(node);
   }
-  if (d.busy) log.append(el("div", "as-status", txServer(d.status) || tx("Working…")));
+  // The working line appears only once the work has run a moment (DESIGN.md, speed); it is
+  // drawn afresh with each change of status, so only the first drawing waits.
+  if (!d.busy) loadAssistant.busySince = 0;
+  else {
+    loadAssistant.busySince ||= Date.now();
+    const fresh = Date.now() - loadAssistant.busySince < parseFloat(token("--t-busy"));
+    log.append(el("div", "as-status" + (fresh ? " fresh" : ""), txServer(d.status) || tx("Working…")));
+  }
   $("#as-send").textContent = d.busy ? tx("Stop") : tx("Send");
   if (atEnd || d.busy) log.scrollTop = log.scrollHeight;
 }
