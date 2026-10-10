@@ -65,6 +65,8 @@ pub struct App {
     status: Mutex<(bool, i64, u64)>,
     /// Background work worth mentioning while it lasts ("Listing older mail"); empty when none.
     activity: Mutex<String>,
+    /// The same, for each account that has such work going on.
+    doing: Mutex<HashMap<i64, String>>,
     pub agent: crate::agent::AgentState,
 }
 
@@ -83,6 +85,7 @@ impl App {
             push_wake: Mutex::new(None),
             status: Mutex::new((true, 0, SYNC_EVERY.as_secs())),
             activity: Mutex::new(String::new()),
+            doing: Mutex::new(HashMap::new()),
             agent: Default::default(),
         })
     }
@@ -144,6 +147,11 @@ impl App {
     /// Forget which conversations were topped up lately, so the next one opened is checked again.
     pub(crate) fn forget_hydrated(&self) {
         self.hydrated.lock().unwrap().clear();
+    }
+
+    /// What each account is busy with in the background, in the words the window shows.
+    pub(crate) fn doing(&self) -> HashMap<i64, String> {
+        self.doing.lock().unwrap().clone()
     }
 
     /// Which accounts have a live IDLE connection right now.
@@ -488,9 +496,14 @@ impl App {
             at.low = from;
             self.db.set_all_mail(account_id, &at)?;
             if let Some(oldest) = oldest {
-                self.set_activity(&format!("Listing older mail… back to {}", month_year(oldest)));
+                let what = format!("Listing older mail… back to {}", month_year(oldest));
+                self.set_activity(&what);
+                self.doing.lock().unwrap().insert(account_id, what);
             }
             self.emit("indexed", email);
+        }
+        if at.low <= 1 {
+            self.doing.lock().unwrap().remove(&account_id);
         }
         Ok(at.low > 1)
     }

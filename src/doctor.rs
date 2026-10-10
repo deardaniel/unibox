@@ -100,14 +100,14 @@ impl App {
             (lines, s.checks.clone(), s.mcp.clone(), s.model.clone(), s.next)
         });
         let c = self.db.conn()?;
-        let watching = self.watching();
+        let (watching, doing) = (self.watching(), self.doing());
         let mut accounts = Vec::new();
         for a in self.db.accounts()? {
             let count = |sql: &str| c.query_row(sql, [a.id], |r| r.get::<_, i64>(0)).unwrap_or(0);
             accounts.push(json!({
                 "id": a.id, "email": a.email, "color": a.color,
                 "watching": watching.get(&a.id).copied().unwrap_or(false),
-                "last_sync": a.last_sync, "last_error": a.last_error, "listing": a.indexing,
+                "last_sync": a.last_sync, "last_error": a.last_error, "listing": a.indexing, "doing": doing.get(&a.id),
                 "messages": count("SELECT COUNT(*) FROM messages WHERE account_id=?"),
                 "waiting": count("SELECT COUNT(*) FROM pending WHERE account_id=?"),
                 "check": checks.get(&format!("imap:{}", a.id)),

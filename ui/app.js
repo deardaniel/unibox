@@ -73,6 +73,9 @@ async function api(path, opts = {}) {
  *  last action back (the same as z). It goes after four seconds or on the next key. */
 function toast(text, { undo: offerUndo = false } = {}) {
   const t = $("#toast");
+  // an open dialog covers the rest of the page and takes its clicks: say it inside the dialog
+  const host = [...document.querySelectorAll("dialog[open]")].pop() || document.body;
+  if (t.parentNode !== host) host.append(t);
   t.textContent = text;
   if (offerUndo) {
     const b = el("button", "", tx("Undo"));
@@ -1098,7 +1101,7 @@ function showDoctor(d) {
       a.watching ? tx("watching the inbox live") : tx("not watching live, checking on a timer"),
       a.last_sync && tx("synced {when}", { when: ago(a.last_sync * 1000) }),
       txn(a.messages, "{n} message listed", "{n} messages listed"),
-      a.listing && tx("still listing older mail"),
+      a.doing ? txServer(a.doing) : a.listing && tx("Listing older mail…"),
       a.waiting ? txn(a.waiting, "{n} change waiting to reach Gmail", "{n} changes waiting to reach Gmail") : "",
     ]);
   }
