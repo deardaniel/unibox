@@ -1026,7 +1026,13 @@ $("#colour-hex").oninput = e => { const v = e.target.value.trim().toLowerCase();
 $("#colour-reset").onclick = () => setColour(PURPLE);
 $("#colour-done").onclick = () => $("#colour-dialog").close();
 const openColour = () => { showColour(); $("#colour-dialog").showModal(); };
-$("#brand .logo").onclick = openColour;
+$("#brand .logo").onclick = () => { $("#brand .logo").blur(); openColour(); };
+// A dialog that closes gives focus back to whatever had it before. If that is in the rail, let
+// it go: the rail is open only while it is being used.
+document.addEventListener("close", e => {
+  if (e.target instanceof HTMLDialogElement) requestAnimationFrame(() => { if ($("#side").contains(document.activeElement)) document.activeElement.blur(); });
+}, true);
+$("#side").addEventListener("click", () => requestAnimationFrame(() => { if ($("#side").contains(document.activeElement)) document.activeElement.blur(); }));
 $("#brand .logo").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openColour(); } };
 
 // ---- subscriptions -------------------------------------------------------------
