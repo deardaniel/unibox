@@ -363,7 +363,7 @@ function listParams() {
 const KINDS = ["", "people", "automated"];
 function showListFilters() {
   $("#unread-only").setAttribute("aria-pressed", state.unreadOnly);
-  for (const b of $("#kind").children) b.setAttribute("aria-pressed", b.dataset.kind === state.kind);
+  for (const b of $("#kind").querySelectorAll("button")) b.setAttribute("aria-pressed", b.dataset.kind === state.kind);
   const scope = $("#scope");
   scope.firstElementChild.textContent = state.all ? tx("All mail") : tx("Inbox");
   scope.setAttribute("aria-pressed", state.all);
