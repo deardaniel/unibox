@@ -385,6 +385,7 @@ const MESSAGES = {
     "Nothing to undo.": "元に戻す操作はありません。",
     "Undone.": "元に戻しました。",
     "Undo": "元に戻す",
+    "More actions": "その他の操作",
     "Archived {n} message.": "メッセージ {n} 件をアーカイブしました。",
     "Archived {n} messages.": "メッセージ {n} 件をアーカイブしました。",
     "Archived {n} message from {sender}.": "{sender} からのメッセージ {n} 件をアーカイブしました。",

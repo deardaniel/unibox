@@ -50,12 +50,13 @@
 
     <section id="pane">
       <div id="thread-bar">
-        <button data-act="archive" data-key="e" title="Archive (e)">Archive</button>
-        <button data-act="unread" data-key="⇧U" title="Mark as unread (Shift+U)">Mark unread</button>
-        <button data-act="star" data-key="s" title="Star (s)">Star</button>
-        <button data-act="expand" data-key=";" title="Open every message in this conversation (;)">Expand all</button>
-        <button data-act="reply" data-key="r" title="Open this conversation in Gmail to reply (r)">Reply in Gmail</button>
-        <button data-act="window" data-key="⇧↵" title="Open this conversation in its own window (Shift+Enter, or Ctrl+click it in the list)">Open in window</button>
+        <button data-act="archive" data-key="e" title="Archive (e)"><span class="t">Archive</span></button>
+        <button data-act="unread" data-key="⇧U" title="Mark as unread (Shift+U)"><span class="t">Mark unread</span></button>
+        <button data-act="star" data-key="s" title="Star (s)"><span class="t">Star</span></button>
+        <button data-act="expand" data-key=";" title="Open every message in this conversation (;)"><span class="t">Expand all</span></button>
+        <button data-act="reply" data-key="r" title="Open this conversation in Gmail to reply (r)"><span class="t">Reply in Gmail</span></button>
+        <button data-act="window" data-key="⇧↵" title="Open this conversation in its own window (Shift+Enter, or Ctrl+click it in the list)"><span class="t">Open in window</span></button>
+        <button data-act="more" class="more" hidden aria-label="More actions" title="More actions"></button>
       </div>
       <!-- One .view per conversation; several are kept rendered so opening is instant. -->
       <div id="link-status" hidden></div>

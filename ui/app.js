@@ -1704,17 +1704,18 @@ function updateThreadBar() {
   const listed = state.open && state.threads.find(t => key(t) === state.open.key);
   const move = $("#thread-bar [data-act=archive], #thread-bar [data-act=inbox]"), out = listed?.in_inbox === false;
   move.dataset.act = out ? "inbox" : "archive";
-  move.textContent = out ? tx("Move to inbox") : tx("Archive");
+  move.firstElementChild.textContent = out ? tx("Move to inbox") : tx("Archive");
   move.dataset.key = out ? "" : "e";
   move.title = out ? tx("Put this conversation back in the inbox") : tx("Archive (e)");
   const starred = state.open?.messages.some(m => m.starred);
-  $('#thread-bar [data-act="star"]').textContent = starred ? tx("★ Starred") : tx("Star");
+  $('#thread-bar [data-act="star"] .t').textContent = starred ? tx("★ Starred") : tx("Star");
   // one button opens every message, or closes them again once all are open
   const b = $('#thread-bar [data-act="expand"]'), nodes = [...(state.open?.node.querySelectorAll(".msg") || [])];
   const allOpen = nodes.every(n => !n.classList.contains("closed"));
   b.hidden = nodes.length < 2;
-  b.textContent = allOpen ? tx("Collapse all") : tx("Expand all");
+  b.firstElementChild.textContent = allOpen ? tx("Collapse all") : tx("Expand all");
   b.dataset.key = allOpen ? ":" : ";";
+  fitThreadBar();
   b.title = allOpen ? tx("Close every message but the last (:)") : tx("Open every message in this conversation (;)");
 }
 
@@ -1907,8 +1908,51 @@ function toggleStar() {
   updateThreadBar();
 }
 
+/** Keep the conversation's bar on one line. When it is too narrow for its buttons they drop
+ *  their labels and keep their keys; if that is still too wide, the last ones fold into a menu. */
+function fitThreadBar() {
+  const bar = $("#thread-bar"), more = $('#thread-bar [data-act="more"]');
+  if (!bar.clientWidth) return;
+  const buttons = [...bar.querySelectorAll("button[data-act]")].filter(b => b !== more);
+  bar.classList.remove("tight");
+  more.hidden = true;
+  for (const b of buttons) b.classList.remove("folded");
+  const over = () => bar.scrollWidth > bar.clientWidth;
+  if (!over()) return;
+  bar.classList.add("tight");
+  if (!over()) return;
+  more.hidden = false;
+  for (const b of buttons.reverse()) {
+    if (!over()) break;
+    b.classList.add("folded");
+  }
+}
+$('#thread-bar [data-act="more"]').append(icon("more"));
+new ResizeObserver(fitThreadBar).observe($("#thread-bar"));
+/** The actions that did not fit, as a menu under the ⋯ button. */
+function threadBarMenu(anchor) {
+  document.querySelector(".menu")?.remove();
+  const menu = el("div", "menu");
+  for (const b of document.querySelectorAll("#thread-bar button.folded:not([hidden])")) {
+    const item = el("button", "", b.textContent);
+    if (b.dataset.key) item.dataset.key = b.dataset.key;
+    item.onclick = () => { done(); b.click(); };
+    menu.append(item);
+  }
+  document.body.append(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = r.bottom + 4 + "px";
+  menu.style.left = Math.max(8, r.right - menu.offsetWidth) + "px";
+  const done = () => { menu.remove(); removeEventListener("pointerdown", close, true); removeEventListener("blur", done); removeEventListener("keydown", esc, true); };
+  const close = e => { if (!menu.contains(e.target)) done(); };
+  const esc = e => { if (e.key === "Escape") { e.stopPropagation(); done(); } };
+  addEventListener("pointerdown", close, true);
+  addEventListener("blur", done);
+  addEventListener("keydown", esc, true);
+}
 $("#thread-bar").addEventListener("click", e => {
-  const a = e.target.dataset?.act;
+  const a = e.target.closest("button")?.dataset.act;
+  if (a === "more") threadBarMenu(e.target.closest("button"));
   if (a === "archive") archive();
   if (a === "inbox") act("inbox");
   if (a === "unread") markUnread();
