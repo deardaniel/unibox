@@ -113,6 +113,7 @@
 
 <dialog id="colour-dialog">
   <h2>Appearance</h2>
+  <div class="scroll">
   <label id="language-row">Language <select id="language"></select></label>
   <h3>Color</h3>
   <p>The color used across Unibox. Its brightness is adjusted where needed so it stays readable in light and dark.</p>
@@ -122,6 +123,7 @@
   <input type="range" id="colour-hue" min="0" max="360" step="1" aria-label="Hue">
   <div id="colour-any-row"><span id="colour-now"></span><input id="colour-hex" spellcheck="false" autocomplete="off" maxlength="7" aria-label="Color as #rrggbb"></div>
   <div id="colour-sample"><button class="primary" tabindex="-1">Button</button><button class="toggle" aria-pressed="true" tabindex="-1">Filter on</button><span class="token">is:unread</span></div>
+  </div>
   <div class="row"><button id="colour-reset">Back to default</button><button id="colour-done" class="primary">Done</button></div>
 </dialog>
 
@@ -154,6 +156,7 @@
 
 <dialog id="help-dialog">
   <h2>Keyboard shortcuts</h2>
+  <div class="scroll">
   <table>
     <tr><td><kbd>j</kbd> <kbd>k</kbd> or <kbd>↓</kbd> <kbd>↑</kbd></td><td>Next / previous conversation</td></tr>
     <tr><td><kbd>o</kbd> or <kbd>Enter</kbd></td><td>Open conversation now</td></tr>
@@ -181,6 +184,7 @@
     <tr><td><kbd>g</kbd> then <kbd>i</kbd></td><td>Back to all inboxes, clearing any search</td></tr>
     <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Show only that account (<kbd>0</kbd> for all)</td></tr>
   </table>
+  </div>
   <form method="dialog" class="row"><button class="primary">Close</button></form>
 </dialog>
 

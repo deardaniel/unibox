@@ -154,7 +154,8 @@ action is not already a key. Destructive actions are a plain button with `--dang
 Icon-only buttons are square at their height and carry an `aria-label`. Colour swatches are
 32 px circles.
 
-**Keys on controls.** The `data-key` badge sits after the label: `--mono` at `--fs-key`,
+**Keys on controls.** The `data-key` badge sits after the label: `--font` (not mono: at 11 px
+Cascadia's `f` and `r` read as `ƒ` and `ɾ`) at `--fs-key`,
 `--r-sm`, hairline border, `--muted`. It is a fixed box (18 px high, at least 18 px wide,
 glyph centred), and the control is a flex row that centres it, so every badge sits on the same
 line whatever its letter (`e`, `⇧U`, `⇧↵`). It never rides on the text baseline. On an *on*
@@ -178,9 +179,19 @@ the matching token or scope. Focus: accent border plus a 1 px accent ring. Sugge
 nothing: each row has a leading slot exactly as wide as the closed rail (the logo, an account's
 unread pill or dot, a tool's icon), and opening only reveals the labels beside it. The unread
 count stays in its coloured pill in that slot, open or closed. It opens after a 120 ms delay and
-widens over 120 ms; nothing else in it animates.
+widens over 120 ms; nothing else in it animates. Open, it floats over the list: a hairline
+on its right edge and `--shadow-float`, so what it covers reads as covered, not cut. Every key in
+the open rail (account numbers, `g s`, `g d`) sits in one right-aligned column.
 
-**Conversation rows.** Fixed height, set on the row itself (`height: var(--row-h)`), never
+**Bars and pane headers.** The thread bar, the assistant header and any other bar at the top of
+a pane are the same height (`--control-h` plus `--s2` above and below) and never wrap, so the
+hairlines under them form one line across the window. When a bar is too narrow, its buttons drop
+their labels and keep their keys, then fold into a `⋯` menu; they do not take a second row.
+
+**The logo.** The accent tile with `--on-accent` text, so it reads in every swatch and theme.
+
+**Conversation rows.** Lines sit at fixed places from the top of the row; a missing snippet
+leaves its line empty rather than moving the others. Fixed height, set on the row itself (`height: var(--row-h)`), never
 taken from its content, so 140,000 rows scroll without layout work and line up at every display
 scale. Unread is
 `--unread-bg` and weight 650, never colour. The cursor is a 4 px `--cursor` bar the full
@@ -218,6 +229,13 @@ line saying what this is, only where the title does not already say it; the cont
 the right of the footer, with a summary on the left only where there is a count worth
 knowing (Subscriptions: senders, mail still in the inbox). `Esc` closes. The focused default
 action shows the focus ring.
+
+A dialog is never taller than the window: at most the window height less `--s6` top and
+bottom. Its title and footer stay put and only the content between them scrolls (in the Doctor,
+only the log). Opening a dialog focuses its first text field, or failing that its default
+button, never a link, a filter or a menu. A button that only closes (Close, Done) is a plain
+button, never `.primary`; `.primary` is for a dialog whose purpose is an action (Add account,
+Save).
 
 **Asking first.** Ask only before something that cannot be undone: removing an account,
 deleting downloaded copies. Those may use the system's own question box; it is native and
