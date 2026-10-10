@@ -327,7 +327,7 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 /* the cursor marker runs the full height of the row, whatever its padding */
 .row-t.cursor::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--cursor); }
 .row-t .bar { grid-area: bar; }
-.row-t .av { grid-area: av; width: 32px; height: 32px; align-self: start; margin-top: 2px; }
+.row-t .av { grid-area: av; width: 32px; height: 32px; align-self: start; }
 .row-t .who { grid-area: who; }
 .row-t .text { grid-area: text; min-width: 0; }
 .row-t .who, .row-t .subj, .row-t .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
