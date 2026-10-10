@@ -897,8 +897,8 @@ mod window {
             .with_visible(visible)
             .build(target)?;
         let id = window.id();
-        // Match the page colour so a resize never flashes white around the edges.
-        let background = if window.theme() == Theme::Dark { (0x13, 0x13, 0x13, 255) } else { (0xf6, 0xf5, 0xf2, 255) };
+        // The page's --bg in each theme (ui/style.css, DESIGN.md), so a resize never flashes another colour around the edges.
+        let background = if window.theme() == Theme::Dark { (0x1f, 0x1f, 0x1f, 255) } else { (0xf4, 0xf4, 0xf3, 255) };
         let origin = origin.to_string();
         let app = origin.clone();
         let webview = WebViewBuilder::new_with_web_context(context)
