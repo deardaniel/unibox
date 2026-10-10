@@ -9,8 +9,9 @@ to use them.
 
 1. **Instant.** Nothing waits on an animation. The outline of what is coming is drawn before
    the data, and every action shows its result in the same frame.
-2. **Keyboard first, mouse welcome.** Every control shows its key on its face (`data-key`).
-   Anything the mouse can do, a key can; anything typed can be clicked.
+2. **Keyboard first, mouse welcome.** By default every control shows its key on its face
+   (`data-key`); the person can turn the badges off once they know the keys. Anything the mouse
+   can do, a key can; anything typed can be clicked.
 3. **One colour, for state.** The picked colour means *on*, *focused*, *here* or *a link*. It
    is never decoration, so its presence always says something.
 4. **Lines, not boxes.** Hairlines and alignment separate things. Shadows are kept for what
@@ -93,6 +94,7 @@ a deliberate off-grid padding) may stay literal: snapping them would move things
   /* depth and motion */
   --shadow-float: 0 8px 24px rgba(0,0,0,.12);
   --shadow-modal: 0 24px 64px rgba(0,0,0,.2);
+  --shadow-side: 6px 0 24px rgba(0,0,0,.12);   /* a panel that opens from the side: the rail */
   --focus: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
   --focus-field: 0 0 0 1px var(--accent);   /* with an accent border: a field being typed in, a divider being dragged */
   --t-rail: 120ms;
@@ -109,6 +111,7 @@ a deliberate off-grid padding) may stay literal: snapping them would move things
     --ok: #5fbf8a; --warn: #e0a84a; --danger: #ff7b6b;
     --shadow-float: 0 8px 24px rgba(0,0,0,.5);
     --shadow-modal: 0 24px 64px rgba(0,0,0,.6);
+    --shadow-side: 6px 0 24px rgba(0,0,0,.5);
   }
 }
 ```
@@ -164,6 +167,23 @@ the group as a trailing cap inside its outline (`⇧F` on the People / Automated
 full control height, joined to the last segment, `--bg` behind, not clickable. It must read as
 part of the pair, never as a separate control. Icon-only buttons have no room for a badge: their key goes in the tooltip
 (`Ctrl+K` on the assistant). Account number keys show on each account when the rail opens.
+`<kbd>` in the `?` dialog uses the same `--font` letters as the badges, so a key looks the same
+wherever it is shown.
+
+**Two switches in Appearance** (an "Interface" section below Color; real labelled checkboxes,
+both on by default, kept per person like the colour):
+
+- *Show keys on buttons.* Off hides every `data-key` badge, the group cap (`⇧F`), the scope
+  chip's key, the rail's keys and the `z` on a toast's Undo. The keys keep working, and stay in
+  tooltips and the `?` dialog. Controls get narrower; nothing else moves.
+- *Show tips.* A tip is text whose only job is to teach a key, gesture or feature: the key line
+  under the search suggestions, "Esc to clear", the example prompts in the empty assistant.
+  Off hides only those.
+
+Neither switch hides a confirmation, an Undo, an error or a status. The Undo toast is the way
+back for something that already happened, not a tip: with keys off it reads "Archived · Undo".
+Implement each switch as one class on `<body>` (`.no-keys`, `.no-tips`) and mark tips with
+`.tip`, so new ones follow the switch without extra code.
 
 **Filter toggles.** Off: a plain button. On: `--tint` background, `--accent` border and text,
 semibold. People / Automated are a joined pair (`.seg`): at most one on, pressing the other
@@ -180,7 +200,7 @@ nothing: each row has a leading slot exactly as wide as the closed rail (the log
 unread pill or dot, a tool's icon), and opening only reveals the labels beside it. The unread
 count stays in its coloured pill in that slot, open or closed. It opens after a 120 ms delay and
 widens over 120 ms; nothing else in it animates. Open, it floats over the list: a hairline
-on its right edge and `--shadow-float`, so what it covers reads as covered, not cut. Every key in
+on its right edge and `--shadow-side`, so what it covers reads as covered, not cut. Every key in
 the open rail (account numbers, `g s`, `g d`) sits in one right-aligned column.
 
 **Bars and pane headers.** The thread bar, the assistant header and any other bar at the top of
@@ -191,7 +211,8 @@ their labels and keep their keys, then fold into a `⋯` menu; they do not take 
 **The logo.** The accent tile with `--on-accent` text, so it reads in every swatch and theme.
 
 **Conversation rows.** Lines sit at fixed places from the top of the row; a missing snippet
-leaves its line empty rather than moving the others. Fixed height, set on the row itself (`height: var(--row-h)`), never
+leaves its line empty rather than moving the others. The date never overlaps: at any width the
+sender line truncates first. The same holds for a message's header in the conversation view. Fixed height, set on the row itself (`height: var(--row-h)`), never
 taken from its content, so 140,000 rows scroll without layout work and line up at every display
 scale. Unread is
 `--unread-bg` and weight 650, never colour. The cursor is a 4 px `--cursor` bar the full

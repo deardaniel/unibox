@@ -57,6 +57,7 @@
   /* depth and motion */
   --shadow-float: 0 8px 24px rgba(0,0,0,.12);
   --shadow-modal: 0 24px 64px rgba(0,0,0,.2);
+  --shadow-side: 6px 0 24px rgba(0,0,0,.12);   /* a panel that opens from the side: the rail */
   --focus: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
   --focus-field: 0 0 0 1px var(--accent);   /* with an accent border: a field being typed in, a divider being dragged */
   --t-rail: 120ms;
@@ -73,6 +74,7 @@
     --ok: #5fbf8a; --warn: #e0a84a; --danger: #ff7b6b;
     --shadow-float: 0 8px 24px rgba(0,0,0,.5);
     --shadow-modal: 0 24px 64px rgba(0,0,0,.6);
+    --shadow-side: 6px 0 24px rgba(0,0,0,.5);
   }
 }
 @media (prefers-color-scheme: dark) {
@@ -94,7 +96,7 @@ button:disabled { opacity: .5; cursor: default; }
 a { color: var(--accent); }
 /* one focus style for every control */
 :where(button, a, input, select, textarea, summary, [tabindex="0"]):focus-visible { outline: none; box-shadow: var(--focus); }
-kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); border-bottom-width: 2px;
+kbd { font: var(--fs-caption)/1 var(--font); border: 1px solid var(--line); border-bottom-width: 2px;
       border-radius: var(--r-sm); padding: 2px 5px; background: var(--panel); }
 /* The key that does the same thing, shown on the control itself. The control is a row that
    centres its label and the badge, and the badge is a box of fixed height with its glyph in the
@@ -114,7 +116,7 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
         display: flex; flex-direction: column; gap: 2px; padding: 10px 6px;
         background: var(--bg); border-right: 1px solid var(--line); white-space: nowrap;
         transition: width var(--t-rail) ease, box-shadow var(--t-rail) ease; }
-#side:hover, #side:focus-within { width: var(--open); box-shadow: var(--shadow-float); transition-delay: var(--t-rail); }
+#side:hover, #side:focus-within { width: var(--open); box-shadow: var(--shadow-side); transition-delay: var(--t-rail); }
 #side > :not(.acct) { flex: none; width: calc(var(--open) - 12px); }
 #side > .acct { flex: none; }
 #brand { display: flex; align-items: center; gap: var(--s2); font-weight: 700; font-size: var(--fs-subtitle); padding: 2px 0 var(--s3); }
