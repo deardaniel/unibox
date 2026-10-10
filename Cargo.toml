@@ -26,6 +26,9 @@ keyring = { version = "3", features = ["windows-native"] }
 # the app window: a native frame hosting the WebView2 runtime that ships with Windows
 tao = "0.37"
 wry = "0.57"
+# only to ask WebView2 to empty its cache; the same versions wry itself uses
+webview2-com = "0.39"
+windows-core = "0.62"
 
 [profile.release]
 opt-level = 2

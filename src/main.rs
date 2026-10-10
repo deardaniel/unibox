@@ -737,6 +737,8 @@ mod window {
         Accent(WindowId, [u8; 3]),
         /// The unread badge for the taskbar button, as (side, RGBA pixels); `None` clears it.
         Badge(WindowId, Option<(u32, Vec<u8>)>),
+        /// Throw away what the window has cached from the web (pictures in mail, mostly).
+        ClearCache,
     }
     static PROXY: OnceLock<Mutex<EventLoopProxy<UserEvent>>> = OnceLock::new();
 
@@ -854,6 +856,8 @@ mod window {
                 }
                 if request.body() == "close" {
                     send(UserEvent::Close(id));
+                } else if request.body() == "clear-cache" {
+                    send(UserEvent::ClearCache);
                 } else if let Some(Ok(badge)) = request.body().strip_prefix("badge:").map(parse_badge) {
                     send(UserEvent::Badge(id, badge));
                 } else if let Some(colour) = request.body().strip_prefix("accent:").and_then(parse_colour) {
@@ -979,6 +983,23 @@ mod window {
                     if let Some((_, w)) = windows.get(&id) {
                         let icon = badge.and_then(|(side, pixels)| Icon::from_rgba(pixels, side, side).ok());
                         w.set_overlay_icon(icon.as_ref());
+                    }
+                }
+                Event::UserEvent(UserEvent::ClearCache) => {
+                    // every window shares one cache, so asking one of them empties it
+                    if let Some((webview, _)) = windows.get(&main_id) {
+                        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2CallDevToolsProtocolMethodCompletedHandler as Done;
+                        use wry::WebViewExtWindows;
+                        let asked = unsafe {
+                            webview.webview().CallDevToolsProtocolMethod(
+                                windows_core::w!("Network.clearBrowserCache"),
+                                windows_core::w!("{}"),
+                                None::<&Done>,
+                            )
+                        };
+                        if let Err(e) = asked {
+                            eprintln!("clearing the window's cache: {e}");
+                        }
                     }
                 }
                 Event::UserEvent(UserEvent::Close(id)) if id != main_id => drop(windows.remove(&id)),

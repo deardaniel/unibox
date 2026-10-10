@@ -2857,6 +2857,8 @@ dependencies = [
  "tokio-stream",
  "ureq",
  "webpki-roots 0.26.11",
+ "webview2-com",
+ "windows-core",
  "wry",
 ]
 

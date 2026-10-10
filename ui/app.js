@@ -1083,12 +1083,27 @@ const fmtBig = n => n < 1073741824 ? fmtSize(n) : (n / 1073741824).toLocaleStrin
 function showDisk(box, k) {
   if (!k) return doctorRow(box, "busy", tx("Disk space"), [tx("Measuring…")]);
   const folder = el("span", "", k.folder);
+  // the window's cache is only copies of what it fetched (pictures in mail, mostly): safe to drop
+  const cache = el("span", "", tx("cache {size}", { size: fmtBig(k.window) }) + " ");
+  if (window.ipc && k.window > 20 * 1048576) {
+    const clear = el("button", "quiet", tx("Clear"));
+    clear.title = tx("Delete the pictures and pages the window has kept from the web. They are fetched again when needed.");
+    clear.onclick = () => {
+      window.ipc.postMessage("clear-cache");
+      clear.disabled = true;
+      clear.textContent = tx("Clearing…");
+      doctor.clearing = Date.now();
+      setTimeout(() => api("/api/doctor", { method: "POST" }).catch(() => {}), 2500);   // measure again
+    };
+    if (Date.now() - (doctor.clearing || 0) < 8000) { clear.disabled = true; clear.textContent = tx("Clearing…"); }
+    cache.append(clear);
+  }
   doctorRow(box, "ok", tx("Disk space"), [
     el("b", "", tx("{size} in all", { size: fmtBig(k.total) })),
     tx("downloaded messages {size} ({n})", { size: fmtBig(k.bodies), n: fmtNum(k.bodies_count) }),
     tx("message list {size} ({n})", { size: fmtBig(k.list), n: fmtNum(k.list_count) }),
     tx("search index {size}", { size: fmtBig(k.search) }),
-    tx("window cache {size}", { size: fmtBig(k.window) }),
+    cache,
     k.rest > 1048576 && tx("other {size}", { size: fmtBig(k.rest) }),
     folder,
   ]);
