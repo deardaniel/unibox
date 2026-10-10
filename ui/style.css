@@ -365,7 +365,8 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .msg > header { display: flex; align-items: flex-start; gap: var(--s3); padding: 10px 14px; cursor: pointer; }
 .msg .who { flex: 1; min-width: 0; line-height: 1.35; }
 .msg .top { display: flex; align-items: baseline; gap: var(--s3); }
-.msg .from { flex: 1; min-width: 0; font-weight: 600; display: flex; align-items: baseline; }
+/* the date never overlaps: the sender gives way first, to nothing if it must, and only then the date */
+.msg .from { flex: 1; min-width: 0; overflow: hidden; font-weight: 600; display: flex; align-items: baseline; }
 .msg .from .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg .addr { color: var(--muted); font-weight: 400; font-size: var(--fs-small); }
 .msg .trust { flex: none; align-self: center; border: 0; background: none; padding: 0 0 0 6px; cursor: pointer; color: var(--muted); height: auto; }
@@ -407,7 +408,7 @@ body.reading .view.on { visibility: visible; pointer-events: auto; }
 .msg .to, .msg .meta { color: var(--muted); font-size: var(--fs-small); }
 .msg .to { overflow-wrap: anywhere; }
 .msg .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msg .when { color: var(--muted); font-size: var(--fs-small); white-space: nowrap; }
+.msg .when { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: var(--fs-small); white-space: nowrap; }
 /* per-message tools: plain text / formatted / original */
 .msg .more svg, .file .dl svg { display: block; }
 .msg .more { border: 0; background: none; color: var(--muted); height: auto; padding: var(--s1) 6px; margin: -4px -6px -4px 0;
