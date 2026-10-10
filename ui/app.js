@@ -973,6 +973,21 @@ function showColour() {
 const pick = change => { Object.assign(picker, change); setColour(hsvToHex(picker.h, picker.s, picker.v)); };
 applyColour(pickedColour());
 addEventListener("storage", e => { if (e.key === "accent") { applyColour(pickedColour()); showColour(); } });
+// Two switches beside the colour, kept the same way: whether controls show their keys, and
+// whether tips (text that only teaches a key or a feature, marked .tip) are shown. Each is one
+// class on <body>, so anything new that carries a key or is a tip follows without more code.
+const SWITCHES = [["#show-keys", "keys", "no-keys"], ["#show-tips", "tips", "no-tips"]];
+function applySwitches() {
+  for (const [box, name, off] of SWITCHES) {
+    const on = store.get(name) !== "off";
+    document.body.classList.toggle(off, !on);
+    $(box).checked = on;
+  }
+  fitThreadBar();   // with no keys to fall back on, its buttons keep their labels
+}
+for (const [box, name] of SWITCHES) $(box).onchange = e => { store.set(name, e.target.checked ? "on" : "off"); applySwitches(); };
+addEventListener("storage", e => { if (e.key === "keys" || e.key === "tips") applySwitches(); });
+applySwitches();
 {
   // the language: the system's unless one is picked here; the page is redrawn in it
   const choose = $("#language");
@@ -1936,8 +1951,11 @@ function fitThreadBar() {
   for (const b of buttons) b.classList.remove("folded");
   const over = () => bar.scrollWidth > bar.clientWidth;
   if (!over()) return;
-  bar.classList.add("tight");
-  if (!over()) return;
+  // labels go and keys stay, unless keys are switched off: then a button is nothing without its label
+  if (!document.body.classList.contains("no-keys")) {
+    bar.classList.add("tight");
+    if (!over()) return;
+  }
   more.hidden = false;
   for (const b of buttons.reverse()) {
     if (!over()) break;
@@ -2028,7 +2046,10 @@ function goInbox() {
 function selectAll(on) {
   state.selected = new Set(on ? state.threads.map(key) : []);
   renderList();
-  if (on) toast(tx("{n} conversations selected. Esc to clear.", { n: fmtNum(state.selected.size) }));
+  if (on) {
+    toast(tx("{n} conversations selected.", { n: fmtNum(state.selected.size) }));
+    $("#toast").append(" ", el("span", "tip", tx("Esc to clear.")));
+  }
 }
 // Space, PageUp/PageDown, Home and End always move the open conversation, wherever focus is,
 // so j/k can pick one and the same hand can read it.
@@ -2168,7 +2189,7 @@ function drawSuggest() {
     row.onpointerdown = e => { e.preventDefault(); takeSuggestion(i); };
     box.append(row);
   });
-  if (suggest.items.length) box.append(el("div", "keys", tx("↑↓ choose   Tab take   Esc close")));
+  if (suggest.items.length) box.append(el("div", "keys tip", tx("↑↓ choose   Tab take   Esc close")));
 }
 async function updateSuggest() {
   const field = $("#search");
@@ -2381,9 +2402,11 @@ function renderAssistant() {
   }
   if (!d.messages.length && !setup) {
     const hint = el("div", "hint");
-    hint.append(el("b", "", tx("Ask about your mail, or tell it what to do.")),
-      tx("“Find all my delivery emails”"), el("br"), tx("“Archive the ones from before this year”"), el("br"),
+    // the examples are a tip; the line above them says what the panel is for
+    const examples = el("span", "tip");
+    examples.append(tx("“Find all my delivery emails”"), el("br"), tx("“Archive the ones from before this year”"), el("br"),
       tx("“What did they say about the refund?”"), el("br"), tx("“Draft a reply saying Saturday works”"));
+    hint.append(el("b", "", tx("Ask about your mail, or tell it what to do.")), examples);
     log.append(hint);
     if (d.previous) {
       const back = el("button", "previous", tx("Back to the previous chat"));

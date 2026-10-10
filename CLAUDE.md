@@ -20,6 +20,9 @@ changing or removing one, go through this list:
   written in American English, with a `ja-JP` entry (and an `en-GB` one only where the
   spelling differs). Text the server sends to the page needs an entry or a pattern in
   `txServer()`. Remove entries for strings that are gone.
+- **Tips**: text whose only job is to teach a key, a gesture or a feature gets the class `tip`,
+  so the "Show tips" switch in Appearance hides it. A confirmation, an Undo, an error or a
+  status is never a tip.
 - **Keyboard shortcuts**: the `?` dialog in `ui/index.html`, the tooltip of the control, and the
   key shown on the control itself (`data-key`; keep it in step when the label changes).
 - **The assistant and MCP tools** (`src/agent.rs`, `src/mcp.rs`): the `mail` view's columns

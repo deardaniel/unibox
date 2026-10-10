@@ -105,6 +105,11 @@ kbd { font: var(--fs-caption)/1 var(--font); border: 1px solid var(--line); bord
 [data-key]:not([data-key=""])::after { content: attr(data-key); flex: none; box-sizing: border-box; height: 18px; min-width: 18px; padding: 0 4px;
   display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r-sm);
   font: 400 var(--fs-key)/1 var(--font); color: var(--muted); white-space: nowrap; }
+/* Keys off (Appearance): every badge goes, and the pair's cap with it; the keys still work. */
+.no-keys [data-key]::after, .no-keys .seg .cap, .no-keys .acct .key { display: none; }
+.no-keys .seg button:has(+ .cap) { border-radius: 0 var(--r) var(--r) 0; }
+/* Tips off: whatever is there only to teach a key or a feature. */
+.no-tips .tip { display: none; }
 [aria-pressed="true"][data-key]::after { color: inherit; border-color: var(--accent-line); }
 
 /* ---- sidebar: a rail that opens over the content on hover ---- */
@@ -569,6 +574,13 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #colour-hex { display: block; width: 96px; margin: 0; font: var(--fs-mono) var(--mono); }
 #colour-sample { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s4); }
 #colour-sample > * { height: var(--control-h); pointer-events: none; }
+/* Interface: two labelled checkboxes, each with a line saying what it reaches */
+#interface { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; margin-bottom: var(--s3); border-top: 1px solid var(--line); }
+#interface h3 { margin: 0; }
+dialog label.switch { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; margin: 0; font-size: var(--fs-body); color: var(--ink); cursor: pointer; }
+dialog label.switch input { width: 18px; height: 18px; margin: 1px 0 0; padding: 0; accent-color: var(--accent); }
+.switch b { display: block; font-weight: 600; }
+.switch small { display: block; font-size: var(--fs-small); line-height: 18px; color: var(--muted); }
 #colour-sample .token { max-width: none; padding-right: var(--s2); }
 
 #subs-dialog { width: min(820px, 94vw); }

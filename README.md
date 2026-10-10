@@ -32,7 +32,8 @@ triage: replying opens the conversation in Gmail.
 - Attachments preview in place. A conversation can be opened in a window of its own.
 - Dark mode follows Windows. Click the U in the corner to choose the language (American
   English, British English or Japanese; it follows Windows by default) and the app's colour:
-  any colour, shaded to suit light and dark.
+  any colour, shaded to suit light and dark. Two switches there hide the key shown on each
+  button and the tips that teach a key or a feature, for when you know them.
 
 **What it tells you about a message**
 

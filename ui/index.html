@@ -123,7 +123,14 @@
   <div id="colour-field" tabindex="0" role="slider" aria-label="How vivid and how bright"><span id="colour-knob"></span></div>
   <input type="range" id="colour-hue" min="0" max="360" step="1" aria-label="Hue">
   <div id="colour-any-row"><span id="colour-now"></span><input id="colour-hex" spellcheck="false" autocomplete="off" maxlength="7" aria-label="Color as #rrggbb"></div>
-  <div id="colour-sample"><button class="primary" tabindex="-1">Button</button><button class="toggle" aria-pressed="true" tabindex="-1">Filter on</button><span class="token">is:unread</span></div>
+  <div id="colour-sample"><button class="primary" tabindex="-1">Button</button><button class="toggle" aria-pressed="true" tabindex="-1" data-key="f">Filter on</button><span class="token">is:unread</span></div>
+  <div id="interface">
+    <h3>Interface</h3>
+    <label class="switch"><input type="checkbox" id="show-keys" checked>
+      <span><b>Show keys on buttons</b><small>The keys still work, and stay in tooltips and the list under <kbd>?</kbd></small></span></label>
+    <label class="switch"><input type="checkbox" id="show-tips" checked>
+      <span><b>Show tips</b><small>Hints that teach a key or a feature, like the keys under search suggestions and the examples in a new assistant chat.</small></span></label>
+  </div>
   </div>
   <div class="row"><button id="colour-reset">Back to default</button><button id="colour-done" autofocus>Done</button></div>
 </dialog>
