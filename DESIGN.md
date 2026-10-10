@@ -192,7 +192,9 @@ hex in script.
 `--shadow-float`. They appear and go instantly; no fade. Menu items are 32 px; a check shows the
 current choice. A toast confirms and offers undo (`z`); it never asks a question, and it goes
 after 4 s or on the next key. A toast raised while a dialog is open shows inside that dialog,
-and `z` works there too (except while typing in a field).
+and `z` works there too (except while typing in a field). A toast repeats the number and unit
+of the control that caused it: "Archive all 120" is followed by "Archived 120 messages", never
+a figure counted another way.
 
 **Status.** A 9 px dot: `--ok` working, `--warn` needs a look, `--danger` failing, a hollow
 `--muted` ring for idle, a pulsing `--accent` dot for busy. The dot sits on the first line of
@@ -217,8 +219,10 @@ action shows the focus ring.
 deleting downloaded copies. Those may use the system's own question box; it is native and
 expected. Everything that can be undone (archive, archive all from a sender, mark, star, move)
 happens at once and offers Undo (`z`) in a toast. Never ask "are you sure?" about an undoable
-action. Where an action could be made undoable cheaply, prefer that to asking: starting a new
-assistant chat keeps the previous one until the toast's Undo has had its chance.
+action. Where an action could be made undoable cheaply, prefer that to asking. Where the natural next step is
+typing, a 4 s toast is too short a window: starting a new assistant chat keeps the previous one,
+and the empty new chat offers "Back to the previous chat" until its first message is sent.
+Kept-for-undo state lives in memory; closing the app is a deliberate act and ends it.
 
 ## Speed
 

@@ -1053,7 +1053,8 @@ async function openSubscriptions() {
       if (wasOpen) leaveConversation();
       for (const r of senders) { r.in_inbox = 0; clearing.get(r)?.(); }
       sum();
-      toast(txn(found.size, "Archived.", "{n} conversations archived."), { undo: true });
+      // the button counted messages, so this does too
+      toast(txn(left, "Archived {n} message.", "Archived {n} messages."), { undo: true });
     };
   };
   sum();
@@ -1085,7 +1086,7 @@ async function openSubscriptions() {
       b.title = tx("Archive the {n} in the inbox from this sender", { n: n(r.in_inbox) });
       b.onclick = async e => {
         e.stopPropagation();
-        if (!await archiveAllFrom(m, r.from_name || r.from_addr)) return;   // nothing was there
+        if (!await archiveAllFrom(m, r.from_name || r.from_addr, r.in_inbox)) return;   // nothing was there
         r.in_inbox = 0;
         b.remove();
         inbox.textContent = "";
@@ -1875,14 +1876,16 @@ function archive() {
   if (!state.all) leaveConversation();   // in All Mail the conversation is still listed: stay on it
 }
 
-/** Clear out everything in the inbox from one sender. One z brings it all back. */
-async function archiveAllFrom(m, from) {
+/** Clear out everything in the inbox from one sender. One z brings it all back. `messages` is
+ *  how many messages the control that asked for it said there were, when it gave a number. */
+async function archiveAllFrom(m, from, messages = 0) {
   const rows = await api(`/api/message/${m.id}/same-source`).catch(e => (toast(txServer(e.message)), []));
   if (!rows.length) return false;
   const wasOpen = rows.some(t => key(t) === state.open?.key);
   act("archive", rows);
   if (wasOpen) leaveConversation();
-  toast(rows.length > 1 ? tx("Archived {n} conversations from {sender}.", { n: fmtNum(rows.length), sender: from }) : tx("Archived."), { undo: true });
+  toast(messages ? txn(messages, "Archived {n} message from {sender}.", "Archived {n} messages from {sender}.", { sender: from })
+    : rows.length > 1 ? tx("Archived {n} conversations from {sender}.", { n: fmtNum(rows.length), sender: from }) : tx("Archived."), { undo: true });
   return true;
 }
 
