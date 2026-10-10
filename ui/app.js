@@ -1708,14 +1708,22 @@ async function updateSuggest() {
   const lower = word.toLowerCase();
   if (!/^(is|in|from):/.test(lower)) return closeSuggest();
   const fixed = FILTER_WORDS.filter(([w]) => w.startsWith(lower) && w !== lower).map(([w, hint]) => ({ word: w, hint }));
-  suggest.items = fixed;
-  suggest.at = 0;
+  // Until the senders for what is typed now arrive, keep the ones already showing that still
+  // fit, so the list narrows in place as letters are added and never blinks shut.
+  const typed = lower.slice(5);
+  const still = lower.startsWith("from:")
+    ? suggest.items.filter(it => it.sender && (it.word.slice(5).includes(typed) || it.name.includes(typed))) : [];
+  const held = suggest.items[suggest.at]?.word;
+  suggest.items = [...fixed, ...still];
+  suggest.at = Math.max(0, suggest.items.findIndex(it => it.word === held));
   drawSuggest();
   if (!lower.startsWith("from:")) return;
   const asked = ++suggest.asked;
   const found = await api("/api/senders?" + new URLSearchParams({ q: word.slice(5) })).catch(() => []);
   if (asked !== suggest.asked || $("#search").value !== field.value || document.activeElement !== field) return;
-  suggest.items = [...fixed, ...found.map(f => ({ word: "from:" + f.addr, hint: f.name && f.name.toLowerCase() !== f.addr ? f.name : `${f.n.toLocaleString()} message${f.n === 1 ? "" : "s"}`, sender: true }))];
+  const chosen = suggest.items[suggest.at]?.word;
+  suggest.items = [...fixed, ...found.map(f => ({ word: "from:" + f.addr, name: (f.name || "").toLowerCase(), hint: f.name && f.name.toLowerCase() !== f.addr ? f.name : `${f.n.toLocaleString()} message${f.n === 1 ? "" : "s"}`, sender: true }))];
+  suggest.at = Math.max(0, suggest.items.findIndex(it => it.word === chosen));
   drawSuggest();
 }
 function takeSuggestion(i) {
