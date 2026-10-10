@@ -207,7 +207,7 @@ function renderAccounts() {
   nav.textContent = "";
   let number = 0;   // the key that shows this one: 0 for all, then 1 to 9
   const item = (id, name, color, unread, acct) => {
-    const b = el("button", "acct" + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : "") + (unread ? "" : " zero"));
+    const b = el("button", "acct" + (acct ? "" : " all") + (state.filter === id ? " on" : "") + (acct?.last_error ? " err" : "") + (unread ? "" : " zero"));
     b.style.setProperty("--c", color);
     // the leading slot is all that shows while the rail is closed
     const lead = el("span", "lead");

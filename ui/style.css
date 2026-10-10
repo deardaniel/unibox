@@ -138,6 +138,8 @@ kbd { font: var(--fs-caption)/1 var(--mono); border: 1px solid var(--line); bord
 .acct .n { min-width: 22px; height: 22px; padding: 0 6px; border-radius: var(--control-h); display: grid; place-items: center;
            background: var(--c); color: var(--on-strong); font-size: var(--fs-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
 .acct .n:empty { display: none; }
+/* "All inboxes" is no account's colour: its count sits on the muted grey, in the page's own ground */
+.acct.all .n { color: var(--bg); }
 .acct .name, .acct .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .acct .key { font-weight: 400; }
 .acct .key::after { margin-left: 0; }
