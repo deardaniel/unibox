@@ -159,6 +159,9 @@ struct ThreadQuery {
     /// Leave out conversations where everything in the inbox was sent by a system.
     #[serde(default)]
     people: bool,
+    /// List everything in All Mail, not only what is in the inbox.
+    #[serde(default)]
+    all: bool,
 }
 
 async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>) -> Api<Json<Vec<db::ThreadRow>>> {
@@ -169,7 +172,7 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
                 return app.db.threads_by_keys(&keys);
             }
             let keep: Vec<&str> = q.keep.split(',').filter(|k| !k.is_empty()).collect();
-            app.db.threads(q.account, q.q.trim(), q.unread, q.people, &serde_json::to_string(&keep)?)
+            app.db.threads(q.account, q.q.trim(), q.unread, q.people, &serde_json::to_string(&keep)?, q.all)
         })
         .await?,
     ))

@@ -29,6 +29,7 @@ const state = {
   unreadOnly: false,     // list only conversations with something unread
   kept: new Set(),       // thread keys opened while unreadOnly is on; they stay listed once read
   peopleOnly: false,     // leave out conversations that only systems sent (newsletters, receipts, notices)
+  all: false,            // list All Mail (archived and sent mail too), not only the inbox
 };
 const key = t => t.account_id + ":" + t.thrid;
 
@@ -294,17 +295,19 @@ function listParams() {
   if (state.filter != null) p.set("account", state.filter);
   if (state.unreadOnly) { p.set("unread", true); p.set("keep", [...state.kept].join(",")); }
   if (state.peopleOnly) p.set("people", true);
+  if (state.all) p.set("all", true);
   return p;
 }
 
-/** The list's two narrowing buttons: only unread (conversations opened while it is on stay
- *  listed), and only mail that people wrote. */
-const LIST_FILTERS = { unreadOnly: "#unread-only", peopleOnly: "#people-only" };
+/** The list's switches: All Mail instead of the inbox, only unread (conversations opened
+ *  while it is on stay listed), and only mail that people wrote. */
+const LIST_FILTERS = { all: "#all-mail", unreadOnly: "#unread-only", peopleOnly: "#people-only" };
 function showListFilters() {
   for (const [name, button] of Object.entries(LIST_FILTERS)) {
     $(button).classList.toggle("on", state[name]);
     $(button).setAttribute("aria-pressed", state[name]);
   }
+  $("#search").placeholder = state.all ? "Search all mail  ( / )" : "Search the inbox  ( / )";
 }
 function setListFilter(name, on) {
   leaveCollection();
@@ -340,12 +343,16 @@ function renderListFoot() {
   $("#list").append(foot);
   const c = { total: state.threads.length, unread: state.threads.filter(t => t.unread).length }, n = x => x.toLocaleString();
   const what = state.collection ? state.collection.title
-    : (state.q ? `Search in ${state.filter == null ? "all inboxes" : account(state.filter)?.email}`
-      : state.filter == null ? "All inboxes" : account(state.filter)?.email || "Inbox")
+    : (state.q ? `Search in ${state.filter == null ? (state.all ? "all mail" : "all inboxes") : account(state.filter)?.email}`
+      : state.filter == null ? (state.all ? "All Mail" : "All inboxes") : account(state.filter)?.email || "Inbox")
+      + (state.all && state.filter != null ? ", all mail" : "")
       + (state.peopleOnly ? ", people only" : "") + (state.unreadOnly ? ", unread only" : "");
+  // All Mail is listed in the background, newest first; say so while older mail is still coming
+  const loading = state.all && !state.collection && state.accounts.some(a => a.indexing && (state.filter == null || a.id === state.filter));
   foot.textContent = "";
   foot.append(el("span", "what", what));
-  foot.append(el("span", "n", `${n(c.total)} conversation${c.total === 1 ? "" : "s"}` + (c.unread && !state.unreadOnly ? ` · ${n(c.unread)} unread` : "")));
+  foot.append(el("span", "n", `${n(c.total)} conversation${c.total === 1 ? "" : "s"}` + (c.unread && !state.unreadOnly ? ` · ${n(c.unread)} unread` : "")
+    + (loading ? " · still listing older mail…" : "")));
   if (state.selected.size) foot.append(el("span", "sel", `${n(state.selected.size)} selected`));
 }
 
@@ -435,7 +442,9 @@ function rowNode(i) {
   const marks = el("span", "marks");
   if (t.has_attach) marks.append("📎");
   if (t.starred) marks.append(el("span", "star", "★"));
-  if (t.in_inbox === false) marks.append(el("span", "gone", "Archived"));
+  // in All Mail most things are archived, so there it is the inbox that gets the label
+  if (state.all && !state.collection) { if (t.in_inbox) marks.append(el("span", "gone", "Inbox")); }
+  else if (t.in_inbox === false) marks.append(el("span", "gone", "Archived"));
   const date = el("span", "date");
   date.append(el("span", "d", fmtDate(t.date)));
   row.append(el("span", "bar"), av, who, text, marks, date);
@@ -1173,6 +1182,12 @@ function focusMessage(i, scroll = true) {
 }
 
 function updateThreadBar() {
+  // a conversation that is not in the inbox can be put back there instead of archived
+  const listed = state.open && state.threads.find(t => key(t) === state.open.key);
+  const move = $("#thread-bar [data-act=archive], #thread-bar [data-act=inbox]"), out = listed?.in_inbox === false;
+  move.dataset.act = out ? "inbox" : "archive";
+  move.textContent = out ? "Move to inbox" : "Archive";
+  move.title = out ? "Put this conversation back in the inbox" : "Archive (e)";
   const starred = state.open?.messages.some(m => m.starred);
   $('#thread-bar [data-act="star"]').textContent = starred ? "★ Starred" : "Star";
   // one button opens every message, or closes them again once all are open
@@ -1229,8 +1244,10 @@ function applyOverrides(rows) {
   const now = Date.now();
   for (const [k, o] of overrides) if (o.until < now) overrides.delete(k);
   if (!overrides.size) return rows;
-  return rows.filter(t => !overrides.get(key(t))?.archive).map(t => {
+  // an archived conversation leaves the inbox list; in All Mail it stays, no longer marked Inbox
+  return rows.filter(t => state.all || !overrides.get(key(t))?.archive).map(t => {
     const o = overrides.get(key(t));
+    if (o?.archive != null) t.in_inbox = !o.archive;
     if (o?.unread != null) t.unread = o.unread;
     if (o?.starred != null) t.starred = o.starred;
     return t;
@@ -1251,6 +1268,10 @@ let lastAction = null;
 /** `record: false` is for changes the user did not make by hand (an undo, or marking a
  *  conversation read because it was opened), which must not become the thing z undoes. */
 function act(op, list = targets(), { record = true } = {}) {
+  // archiving what is already archived, or moving to the inbox what is already there, is nothing
+  const inInbox = t => (state.threads.find(x => key(x) === key(t)) || t).in_inbox !== false;
+  if (op === "archive") list = list.filter(inInbox);
+  if (op === "inbox") list = list.filter(t => !inInbox(t));
   if (!list.length) return;
   const undoing = !record;
   if (record) lastAction = { op, items: [] };
@@ -1259,14 +1280,17 @@ function act(op, list = targets(), { record = true } = {}) {
     const k = key(t);
     const index = state.threads.findIndex(x => key(x) === k);
     const row = state.threads[index];
-    remember(k, { archive: op === "archive" || undefined,
+    remember(k, { archive: op === "archive" ? true : op === "inbox" ? false : undefined,
       unread: op === "read" ? 0 : op === "unread" ? 1 : undefined,
       starred: op === "star" ? true : op === "unstar" ? false : undefined });
-    if (op === "archive") {
+    if (op === "archive" && state.all) {
+      if (row) row.in_inbox = false;
+    } else if (op === "archive") {
       state.threads = state.threads.filter(x => key(x) !== k);
       const v = state.views.get(k);
       if (v) dropView(v);
     } else if (row) {
+      if (op === "inbox") row.in_inbox = true;
       if (op === "read") row.unread = 0;
       if (op === "unread") row.unread = 1;
       if (op === "star") row.starred = true;
@@ -1280,9 +1304,10 @@ function act(op, list = targets(), { record = true } = {}) {
   }
   state.selected.clear();
   renderList();
+  updateThreadBar();
 }
 
-const INVERSE = { read: "unread", unread: "read", star: "unstar", unstar: "star" };
+const INVERSE = { read: "unread", unread: "read", star: "unstar", unstar: "star", inbox: "archive" };
 async function undo() {
   const last = lastAction;
   if (!last) return toast("Nothing to undo.");
@@ -1295,8 +1320,10 @@ async function undo() {
   for (const { t, index } of [...last.items].sort((a, b) => a.index - b.index)) {
     overrides.delete(key(t));
     if (!state.threads.some(x => key(x) === key(t))) state.threads.splice(Math.min(Math.max(index, 0), state.threads.length), 0, t);
+    t.in_inbox = true;
   }
   renderList();
+  updateThreadBar();
   const first = last.items[0];
   if (first) { setCursor(state.threads.findIndex(x => key(x) === key(first.t))); show(first.t); }
   toast(last.items.length > 1 ? `${last.items.length} conversations back in the inbox.` : "Back in the inbox.");
@@ -1319,7 +1346,7 @@ function leaveConversation() {
 
 function archive() {
   act("archive");
-  leaveConversation();
+  if (!state.all) leaveConversation();   // in All Mail the conversation is still listed: stay on it
 }
 
 /** Clear out everything in the inbox from one sender. One z brings it all back. */
@@ -1354,6 +1381,7 @@ function toggleStar() {
 $("#thread-bar").addEventListener("click", e => {
   const a = e.target.dataset?.act;
   if (a === "archive") archive();
+  if (a === "inbox") act("inbox");
   if (a === "unread") markUnread();
   if (a === "star") toggleStar();
   if (a === "expand") expandAll();
@@ -1401,7 +1429,7 @@ let gPending = 0, starPending = 0;
 function goInbox() {
   $("#search").value = "";
   state.q = "";
-  state.unreadOnly = state.peopleOnly = false;
+  state.unreadOnly = state.peopleOnly = state.all = false;
   state.kept = new Set();
   showListFilters();
   setFilter(null);   // also leaves any set the assistant was showing
@@ -1454,6 +1482,7 @@ function onKey(e) {
   }
   if (k === "Enter" && e.shiftKey) { openInWindow(); return e.preventDefault(); }
   if (gPending && Date.now() - gPending < 1500 && k === "i") { gPending = 0; goInbox(); return e.preventDefault(); }
+  if (gPending && Date.now() - gPending < 1500 && k === "a") { gPending = 0; if (!state.all) setListFilter("all", true); return e.preventDefault(); }
   gPending = 0;
   // * then a selects every conversation in the list, * then n none (as in Gmail)
   if (starPending && Date.now() - starPending < 1500 && (k === "a" || k === "n")) {
@@ -1534,6 +1563,7 @@ function renderSync() {
 function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
 $("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
+$("#all-mail").onclick = e => { e.currentTarget.blur(); setListFilter("all", !state.all); };
 $("#unread-only").onclick = e => { e.currentTarget.blur(); setListFilter("unreadOnly", !state.unreadOnly); };
 $("#people-only").onclick = e => { e.currentTarget.blur(); setListFilter("peopleOnly", !state.peopleOnly); };
 $("#help").onclick = () => $("#help-dialog").showModal();
@@ -1678,7 +1708,7 @@ function appState() {
     now: now.toLocaleString("sv") + " " + now.toLocaleDateString("en", { weekday: "long" }),
     accounts: state.accounts.map(a => ({ account_id: a.id, address: a.email })),
     list_is_showing: state.collection ? `the set you showed, titled "${state.collection.title}"`
-      : state.q ? `inbox search results for "${state.q}"` : "the inbox",
+      : state.q ? `${state.all ? "all mail" : "inbox"} search results for "${state.q}"` : state.all ? "All Mail (archived and sent mail too)" : "the inbox",
     account_filter: state.filter == null ? null : account(state.filter)?.email,
     conversations_listed: state.threads.length,
     open: state.open ? brief(open || { ...state.open, subject: state.open.messages[0]?.subject }) : null,
@@ -1728,7 +1758,7 @@ $("#as-setup").addEventListener("submit", async e => {
 /** The assistant picked a set of conversations: put it in the list. */
 function showCollection(title) {
   state.collection = { title };
-  state.unreadOnly = state.peopleOnly = false;
+  state.unreadOnly = state.peopleOnly = state.all = false;
   showListFilters();
   state.q = "";
   $("#search").value = "";
@@ -1778,7 +1808,7 @@ async function refresh() {
   }
 }
 
-let refreshTimer;
+let refreshTimer, indexedTimer = 0;
 function refreshSoon() { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => refresh().catch(() => {}), 250); }
 
 function listen() {
@@ -1791,6 +1821,12 @@ function listen() {
     if (ev.kind === "agent-show") return SOLO ? null : showCollection(ev.detail);
     if (ev.kind === "agent-acted") { if (!SOLO) assistantActed(JSON.parse(ev.detail)); return; }
     if (SOLO) { if (state.open) loadView(state.open, true).catch(() => {}); return; }
+    if (ev.kind === "indexed") {
+      // older mail being listed in the background: only All Mail shows it, and not every chunk
+      if (!state.all || indexedTimer) return;
+      indexedTimer = setTimeout(() => { indexedTimer = 0; refresh().catch(() => {}); }, 4000);
+      return;
+    }
     if (ev.kind === "thread") {
       for (const v of state.views.values()) if (v.thrid === ev.detail) loadView(v, true).catch(() => {});
     }

@@ -18,6 +18,25 @@ pub struct Account {
     pub unread: i64,
     pub last_sync: Option<i64>,
     pub last_error: Option<String>,
+    /// Older mail is still being listed from All Mail.
+    pub indexing: bool,
+}
+
+/// The part of an account's All Mail folder that is listed locally: every message with a
+/// UID from `low` to `high`. `low` works its way down to 1. `swept` is when read/star marks
+/// and deletions were last checked across the whole of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AllMail {
+    pub low: u32,
+    pub high: u32,
+    pub swept: i64,
+}
+
+impl AllMail {
+    fn parse(v: &str) -> Option<AllMail> {
+        let mut n = v.split(',');
+        Some(AllMail { low: n.next()?.parse().ok()?, high: n.next()?.parse().ok()?, swept: n.next()?.parse().ok()? })
+    }
 }
 
 #[derive(Serialize)]
@@ -164,6 +183,11 @@ impl Db {
             c.execute("ALTER TABLE messages ADD COLUMN facts TEXT", [])?;
             c.execute("ALTER TABLE messages ADD COLUMN automated INTEGER", [])?;
         }
+        if !has_column("all_uid")? {
+            // UID in All Mail, once the background index of that folder has reached the message
+            c.execute("ALTER TABLE messages ADD COLUMN all_uid INTEGER", [])?;
+        }
+        c.execute("CREATE INDEX IF NOT EXISTS messages_all ON messages(account_id, all_uid)", [])?;
         Ok(db)
     }
 
@@ -180,7 +204,8 @@ impl Db {
         let mut st = c.prepare(
             "SELECT a.id, a.email, a.color, a.last_sync, a.last_error,
                     (SELECT COUNT(DISTINCT gm_thrid) FROM messages m
-                      WHERE m.account_id=a.id AND m.in_inbox=1 AND m.seen=0)
+                      WHERE m.account_id=a.id AND m.in_inbox=1 AND m.seen=0),
+                    (SELECT value FROM meta WHERE key='allmail:' || a.id)
                FROM accounts a ORDER BY a.id",
         )?;
         let rows = st.query_map([], |r| {
@@ -191,6 +216,7 @@ impl Db {
                 last_sync: r.get(3)?,
                 last_error: r.get(4)?,
                 unread: r.get(5)?,
+                indexing: r.get::<_, Option<String>>(6)?.and_then(|v| AllMail::parse(&v)).map_or(true, |a| a.low > 1),
             })
         })?;
         let mut accounts: Vec<Account> = rows.collect::<rusqlite::Result<_>>()?;
@@ -291,6 +317,7 @@ impl Db {
         unread_only: bool,
         people_only: bool,
         keep: &str,
+        all_mail: bool,
     ) -> Result<Vec<ThreadRow>> {
         let c = self.conn()?;
         let like = format!("%{}%", query.replace('%', "").replace('_', " "));
@@ -303,9 +330,9 @@ impl Db {
                          GROUP BY n ORDER BY MIN(t.date))),
                     (SELECT COUNT(*) FROM messages t WHERE t.account_id=m.account_id AND t.gm_thrid=m.gm_thrid),
                     SUM(seen=0), SUM(starred)>0, SUM(has_attach)>0, from_name, from_addr,
-                    SUM(automated=0)>0
+                    SUM(automated=0)>0, SUM(in_inbox)>0
                FROM messages m
-              WHERE in_inbox=1
+              WHERE (?6=1 OR in_inbox=1)
                 AND (?1 IS NULL OR account_id=?1)
                 AND (?2='%%' OR EXISTS (SELECT 1 FROM messages s
                        WHERE s.account_id=m.account_id AND s.gm_thrid=m.gm_thrid
@@ -316,7 +343,7 @@ impl Db {
                 AND (?5=0 OR SUM(COALESCE(automated, 0)=0)>0)
               ORDER BY newest DESC",
         )?;
-        let rows = st.query_map(params![account, like, unread_only, keep, people_only], |r| {
+        let rows = st.query_map(params![account, like, unread_only, keep, people_only, all_mail], |r| {
             Ok(ThreadRow {
                 account_id: r.get(0)?,
                 thrid: r.get(1)?,
@@ -330,11 +357,21 @@ impl Db {
                 has_attach: r.get(9)?,
                 from_name: r.get(10)?,
                 from_addr: r.get(11)?,
-                in_inbox: true,
+                in_inbox: r.get(13)?,
                 people: r.get::<_, Option<bool>>(12)?.unwrap_or(false),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    // ---- All Mail --------------------------------------------------------
+    /// How far the index of an account's All Mail folder has got.
+    pub fn all_mail(&self, account_id: i64) -> Result<Option<AllMail>> {
+        Ok(self.meta(&format!("allmail:{account_id}"))?.and_then(|v| AllMail::parse(&v)))
+    }
+
+    pub fn set_all_mail(&self, account_id: i64, a: &AllMail) -> Result<()> {
+        self.set_meta(&format!("allmail:{account_id}"), &format!("{},{},{}", a.low, a.high, a.swept))
     }
 
     pub fn thread_messages(&self, account_id: i64, thrid: &str) -> Result<Vec<MessageRow>> {

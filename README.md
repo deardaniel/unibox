@@ -10,6 +10,8 @@ triage: replying opens the conversation in Gmail.
 - One threaded list across every account, or one account at a time, with search.
 - The whole list is there at once (no "load more"), with a count of conversations and
   unread beneath it.
+- All Mail (`g` `a`) lists everything, archived and sent mail too; `g` `i` goes back to the
+  inbox. A conversation there can be moved back to the inbox.
 - Filters for unread only (`f`) and for mail a person wrote rather than a machine (`F`).
 - Archive, read/unread and star are written back to Gmail. `z` undoes.
 - Gmail's keyboard shortcuts: `j`/`k`, `o`, `u`, `e`, `s`, `x`, `/` and the rest. Press `?`
@@ -69,7 +71,9 @@ DLL. It is not code-signed, so Windows asks for confirmation the first time it r
 
 `unibox.exe` is a Rust program. It syncs each account over IMAP, keeps an IDLE connection
 open per account so new mail shows up straight away, and falls back to a full sync every
-two minutes (every fifteen while every account is being watched). It serves the interface on
+two minutes (every fifteen while every account is being watched). Everything in the inbox
+is downloaded ahead of time; the rest of All Mail is listed in the background, headers only
+and newest first, and a message's body is fetched when its conversation is opened. It serves the interface on
 `127.0.0.1:47821` and shows it in its own window (tao + wry hosting WebView2). Closing the
 main window exits the app.
 

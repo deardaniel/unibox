@@ -37,7 +37,7 @@ LOCK = threading.Lock()
 
 
 class Msg:
-    def __init__(self, n, thrid, raw, when, inbox=True, seen=False, starred=False):
+    def __init__(self, n, thrid, raw, when, inbox=True, seen=False, starred=False, draft=False):
         self.msgid = str(1800000000000000000 + n)
         self.thrid = str(1800000000000000000 + thrid)
         self.raw = raw
@@ -48,6 +48,8 @@ class Msg:
             self.flags.add("\\Seen")
         if starred:
             self.flags.add("\\Flagged")
+        if draft:
+            self.flags.add("\\Draft")
         self.uid_all = n
         self.uid_inbox = n + 1000
 
@@ -101,7 +103,7 @@ def mailbox(owner):
     def add(thrid, hours_ago, **kw):
         nonlocal n
         n += 1
-        flags = {k: kw.pop(k) for k in ("inbox", "seen", "starred") if k in kw}
+        flags = {k: kw.pop(k) for k in ("inbox", "seen", "starred", "draft") if k in kw}
         when = NOW - int(hours_ago * 3600)
         kw.setdefault("to", owner)
         if owner in kw["frm"]:
@@ -202,6 +204,15 @@ def mailbox(owner):
     # A long read, several screens tall, for trying the remembered reading position.
     add(12, 11, frm="Works in Print <essays@longreads.example>", subject="The long essay: how the canal was dug", seen=True,
         html="".join(f"<h2>Part {i + 1}</h2><p>" + f"Paragraph {i + 1} of the essay goes on at some length. " * 30 + "</p>" for i in range(40)))
+    # Mail that is only in All Mail: archived conversations (FAKE_ARCHIVE sets how many), one of
+    # them unread, and a draft, which the app should not list.
+    for i in range(int(os.environ.get("FAKE_ARCHIVE", "40"))):
+        add(5000 + i, 60 + i * 11, frm=f"Old Friend {i} <friend{i}@example.org>", subject=f"Archived conversation {i}",
+            text=f"This is archived message {i}, kept only in All Mail. " * 3, inbox=False, seen=i != 3, human=True)
+    add(5000, 58, frm=f"Me <{owner}>", to="Old Friend 0 <friend0@example.org>", subject="Re: Archived conversation 0",
+        inbox=False, seen=True, text="My reply, also archived.")
+    add(4999, 2, frm=f"Me <{owner}>", to="nobody@example.org", subject="An unfinished draft", inbox=False, seen=True,
+        draft=True, text="This draft should not be listed.")
     # FAKE_ROUTINE=3000 makes a long inbox, for trying the list at a realistic size
     for i in range(int(os.environ.get("FAKE_ROUTINE", "70"))):
         add(100 + i, 30 + i * 7, frm=f"Sender {i} <sender{i}@example.com>", subject=f"Routine message number {i}",

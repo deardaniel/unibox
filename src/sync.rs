@@ -18,6 +18,13 @@ const FULL_ITEMS: &str = "(UID X-GM-MSGID X-GM-THRID FLAGS INTERNALDATE RFC822.S
 /// Everything in the inbox is downloaded ahead of time, except messages bigger than this,
 /// which load when opened.
 const MAX_PREFETCH_SIZE: i64 = 25 * 1024 * 1024;
+/// All Mail is listed (headers only) this many UIDs at a time, newest first.
+const INDEX_CHUNK: u32 = 2000;
+/// Every pass re-checks read/star marks and deletions among this many of the newest UIDs...
+const RECENT_UIDS: u32 = 3000;
+/// ...and the whole folder this often.
+const SWEEP_EVERY: i64 = 3600;
+const SWEEP_CHUNK: u32 = 20_000;
 const SYNC_EVERY: Duration = Duration::from_secs(120);
 /// ...unless every account has a live IDLE connection telling us about inbox changes as
 /// they happen. Then the timed pass is only a safety net.
@@ -385,8 +392,127 @@ impl App {
                 self.emit("changed", email);
             }
         }
+
+        // Last, the list of everything else: All Mail, headers only.
+        if !all_mail_open {
+            let all_mail = imap.all_mail()?;
+            imap.select(&all_mail, true)?;
+        }
+        let more = self.index_all_mail(&mut imap, account_id, email, deadline)?;
         imap.logout();
-        Ok(false)
+        Ok(more)
+    }
+
+    /// With All Mail selected, bring the local list of that folder up to date: headers of
+    /// anything new, read/star marks and deletions among recent mail (and now and then all
+    /// of it), then older mail a chunk at a time until `deadline`. Bodies are not fetched;
+    /// they come when a conversation is opened. Returns whether older mail is still to come.
+    fn index_all_mail(&self, imap: &mut Imap, account_id: i64, email: &str, deadline: Instant) -> Result<bool> {
+        let Some(top) = imap.uid_fetch("*", "(UID)")?.iter().filter_map(fetched_uid).max() else {
+            return Ok(false); // nothing there at all
+        };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+        let mut at = self.db.all_mail(account_id)?.unwrap_or(crate::db::AllMail { low: top + 1, high: top, swept: now });
+        if top > at.high {
+            let mut from = at.high + 1;
+            while from <= top {
+                let to = top.min(from + INDEX_CHUNK - 1);
+                self.index_range(imap, account_id, from, to)?;
+                from = to + 1;
+            }
+            at.high = top;
+            self.db.set_all_mail(account_id, &at)?;
+            self.emit("changed", email);
+        }
+        if at.low <= at.high {
+            let whole = now - at.swept >= SWEEP_EVERY;
+            let mut from = if whole { at.low } else { at.low.max(at.high.saturating_sub(RECENT_UIDS)) };
+            let mut changed = false;
+            while from <= at.high {
+                let to = at.high.min(from + SWEEP_CHUNK - 1);
+                changed |= self.sweep_range(imap, account_id, from, to)?;
+                from = to + 1;
+            }
+            if whole {
+                at.swept = now;
+                self.db.set_all_mail(account_id, &at)?;
+            }
+            if changed {
+                self.emit("changed", email);
+            }
+        }
+        while at.low > 1 && Instant::now() < deadline {
+            let from = at.low.saturating_sub(INDEX_CHUNK).max(1);
+            self.index_range(imap, account_id, from, at.low - 1)?;
+            at.low = from;
+            self.db.set_all_mail(account_id, &at)?;
+            self.emit("indexed", email);
+        }
+        Ok(at.low > 1)
+    }
+
+    /// List the All Mail messages with UIDs `from..=to`. Drafts are left out.
+    fn index_range(&self, imap: &mut Imap, account_id: i64, from: u32, to: u32) -> Result<()> {
+        let fetched = imap.uid_fetch(&format!("{from}:{to}"), HEADER_ITEMS)?;
+        let mut c = self.db.conn()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for f in &fetched {
+            // "n:*" style answers can include a message outside the range asked for
+            let (Some(uid), Some(msgid)) = (fetched_uid(f), f.get("X-GM-MSGID")) else { continue };
+            if uid < from || uid > to || is_draft(f) {
+                continue;
+            }
+            insert_fetched(&tx, account_id, f, false)?;
+            tx.execute(
+                "UPDATE messages SET all_uid=? WHERE account_id=? AND gm_msgid=?",
+                params![uid, account_id, msgid.text()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Check the listed All Mail messages with UIDs `from..=to` against the server: take on
+    /// read/star marks changed elsewhere, and forget messages that are gone (deleted, or
+    /// moved to Spam). Returns whether anything changed.
+    fn sweep_range(&self, imap: &mut Imap, account_id: i64, from: u32, to: u32) -> Result<bool> {
+        let listing: HashMap<u32, (bool, bool)> = imap
+            .uid_fetch(&format!("{from}:{to}"), "(UID FLAGS)")?
+            .iter()
+            .filter_map(|f| Some((fetched_uid(f)?, fetched_flags(f))))
+            .collect();
+        let mut c = self.db.conn()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let local: Vec<(i64, u32, bool, bool, bool)> = {
+            // a change of ours that is still on its way to Gmail wins
+            let mut st = tx.prepare(
+                "SELECT id, all_uid, seen, starred, in_inbox FROM messages
+                  WHERE account_id=?1 AND all_uid BETWEEN ?2 AND ?3
+                    AND gm_msgid NOT IN (SELECT gm_msgid FROM pending WHERE account_id=?1)",
+            )?;
+            let rows = st.query_map(params![account_id, from, to], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let mut changed = false;
+        for (id, uid, seen, starred, in_inbox) in local {
+            match listing.get(&uid) {
+                Some(&(s, f)) if (s, f) != (seen, starred) => {
+                    tx.execute("UPDATE messages SET seen=?, starred=? WHERE id=?", params![s, f, id])?;
+                    changed = true;
+                }
+                Some(_) => {}
+                // still in the inbox as far as we know: the inbox sync deals with it first
+                None if in_inbox => {}
+                None => {
+                    tx.execute("DELETE FROM messages WHERE id=?", [id])?;
+                    changed = true;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// With All Mail selected, download every message of these conversations that we
@@ -530,6 +656,21 @@ impl App {
     /// whenever another thread has written in between, which the busy timeout cannot wait out.
     pub fn act(&self, account_id: i64, thrid: &str, op: &str) -> Result<Vec<String>> {
         let acct = self.db.account(account_id)?.ok_or_else(|| anyhow!("no such account"))?;
+        if op == "inbox" {
+            // Move to inbox: the reverse of archiving, for every message of the conversation.
+            let msgids: Vec<String> = {
+                let c = self.db.conn()?;
+                let mut st = c.prepare(
+                    "SELECT gm_msgid FROM messages WHERE account_id=? AND gm_thrid=? AND in_inbox=0 AND all_uid IS NOT NULL",
+                )?;
+                let rows = st.query_map(params![account_id, thrid], |r| r.get(0))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            if !msgids.is_empty() {
+                self.unarchive(account_id, &msgids)?;
+            }
+            return Ok(msgids);
+        }
         let local = match op {
             "archive" => "in_inbox=0",
             "read" => "seen=1",
@@ -538,23 +679,37 @@ impl App {
             "unstar" => "starred=0",
             _ => return Err(anyhow!("unknown action {op}")),
         };
-        // Gmail stars, and marks unread, the latest message of a conversation.
-        let only_latest = if matches!(op, "star" | "unread") { " ORDER BY date DESC LIMIT 1" } else { "" };
+        // Gmail stars, and marks unread, the latest message of a conversation: the latest in
+        // the inbox when it has any there.
+        let only_latest = if matches!(op, "star" | "unread") { " ORDER BY in_inbox DESC, date DESC LIMIT 1" } else { "" };
+        // A message is addressed by its UID in the inbox while it is there, and otherwise by
+        // its UID in All Mail (queued as "all:<op>"), where only marks can change: there is
+        // nothing to archive, and no point re-marking what is already so.
+        let elsewhere = match op {
+            "archive" => "0",
+            "read" => "seen=0",
+            "unstar" => "starred=1",
+            _ => "1",
+        };
         let mut c = self.db.conn()?;
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        // Only messages sitting in the inbox have a UID we can address.
-        let targets: Vec<(String, u32)> = {
+        let targets: Vec<(String, u32, bool)> = {
             let mut st = tx.prepare(&format!(
-                "SELECT gm_msgid, uid FROM messages
-                  WHERE account_id=? AND gm_thrid=? AND in_inbox=1 AND uid IS NOT NULL{only_latest}"
+                "SELECT gm_msgid, CASE WHEN in_inbox=1 AND uid IS NOT NULL THEN uid ELSE all_uid END,
+                        in_inbox=1 AND uid IS NOT NULL
+                   FROM messages
+                  WHERE account_id=? AND gm_thrid=?
+                    AND ((in_inbox=1 AND uid IS NOT NULL) OR (in_inbox=0 AND all_uid IS NOT NULL AND {elsewhere}))
+                  {only_latest}"
             ))?;
-            let rows = st.query_map(params![account_id, thrid], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            let rows = st.query_map(params![account_id, thrid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
-        for (msgid, uid) in &targets {
+        for (msgid, uid, inbox) in &targets {
+            let queued = if *inbox { op.to_string() } else { format!("all:{op}") };
             tx.execute(
                 "INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?,?,?,?)",
-                params![account_id, msgid, op, uid],
+                params![account_id, msgid, queued, uid],
             )?;
             tx.execute(
                 &format!("UPDATE messages SET {local} WHERE account_id=? AND gm_msgid=?"),
@@ -566,7 +721,7 @@ impl App {
             self.emit("changed", &acct.email);
             self.push_soon();
         }
-        Ok(targets.into_iter().map(|(msgid, _)| msgid).collect())
+        Ok(targets.into_iter().map(|(msgid, _, _)| msgid).collect())
     }
 
     /// Undo an archive: put these messages back in the inbox. An archive that has not been
@@ -680,6 +835,22 @@ impl App {
                             }
                             imap.select("INBOX", false)?;
                         }
+                        // Marks on messages that are not in the inbox are set in All Mail.
+                        marks if marks.starts_with("all:") => {
+                            let change = match &marks[4..] {
+                                "read" => "+FLAGS.SILENT (\\Seen)",
+                                "unread" => "-FLAGS.SILENT (\\Seen)",
+                                "star" => "+FLAGS.SILENT (\\Flagged)",
+                                "unstar" => "-FLAGS.SILENT (\\Flagged)",
+                                other => return Err(anyhow!("unknown queued change all:{other}")),
+                            };
+                            if all_mail.is_none() {
+                                all_mail = Some(imap.all_mail()?);
+                            }
+                            imap.select(all_mail.as_deref().unwrap_or_default(), false)?;
+                            imap.run(&format!("UID STORE {set} {change}"))?;
+                            imap.select("INBOX", false)?;
+                        }
                         "read" => drop(imap.run(&format!("UID STORE {set} +FLAGS.SILENT (\\Seen)"))?),
                         "unread" => drop(imap.run(&format!("UID STORE {set} -FLAGS.SILENT (\\Seen)"))?),
                         "star" => drop(imap.run(&format!("UID STORE {set} +FLAGS.SILENT (\\Flagged)"))?),
@@ -746,6 +917,10 @@ fn fetched_flags(f: &Fetched) -> (bool, bool) {
     let flags: Vec<String> =
         f.get("FLAGS").map(|v| v.list().iter().map(|a| a.text().to_ascii_lowercase()).collect()).unwrap_or_default();
     (flags.iter().any(|x| x == "\\seen"), flags.iter().any(|x| x == "\\flagged"))
+}
+
+fn is_draft(f: &Fetched) -> bool {
+    f.get("FLAGS").is_some_and(|v| v.list().iter().any(|a| a.text().eq_ignore_ascii_case("\\draft")))
 }
 
 /// Insert a message from a FETCH carrying headers or a full body.
