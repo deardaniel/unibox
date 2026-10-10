@@ -478,7 +478,12 @@ dialog td { padding: var(--s1) 14px var(--s1) 0; vertical-align: top; }
 #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--ink); color: var(--panel);
          padding: var(--s2) 14px; border-radius: var(--r-lg); box-shadow: var(--shadow-float); opacity: 0;
          pointer-events: none; z-index: 20; max-width: 80vw; }
-#toast.show { opacity: 1; }
+#toast.show { opacity: 1; pointer-events: auto; }
+/* its Undo button, on the toast's inverted ground */
+#toast button { height: var(--control-h-sm); margin-left: var(--s3); padding: 0 var(--s2); background: none; color: inherit;
+                border-color: color-mix(in srgb, var(--panel) 35%, transparent); }
+#toast button:hover { background: color-mix(in srgb, var(--panel) 15%, transparent); }
+#toast button::after { color: inherit; border-color: color-mix(in srgb, var(--panel) 35%, transparent); }
 #trust-dialog { width: min(560px, 92vw); }
 #trust-dialog .verdict { color: var(--ink); font-weight: 600; }
 #trust-dialog .verdict.verified { color: var(--ok); }

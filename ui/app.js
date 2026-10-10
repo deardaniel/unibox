@@ -64,13 +64,23 @@ async function api(path, opts = {}) {
   return r.status === 204 || r.status === 202 ? null : r.json();
 }
 
-function toast(text) {
+/** Say that something happened. It never asks anything; `undo` adds a button that takes the
+ *  last action back (the same as z). It goes after four seconds or on the next key. */
+function toast(text, { undo: offerUndo = false } = {}) {
   const t = $("#toast");
   t.textContent = text;
+  if (offerUndo) {
+    const b = el("button", "", tx("Undo"));
+    b.dataset.key = "z";
+    b.onclick = () => undo();
+    t.append(b);
+  }
   t.classList.add("show");
   clearTimeout(toast.h);
   toast.h = setTimeout(() => t.classList.remove("show"), 4000);
 }
+// before the key does whatever it does, which may be to raise a toast of its own
+addEventListener("keydown", () => $("#toast").classList.remove("show"), true);
 
 // Links leave the app: they go to the default browser, where you are signed in.
 function openExternal(url) {
@@ -1708,6 +1718,12 @@ function act(op, list = targets(), { record = true } = {}) {
   state.selected.clear();
   renderList();
   updateThreadBar();
+  if (record) {
+    const said = { archive: ["Archived.", "{n} conversations archived."], inbox: ["Moved to the inbox.", "{n} conversations moved to the inbox."],
+      read: ["Marked read.", "{n} conversations marked read."], unread: ["Marked unread.", "{n} conversations marked unread."],
+      star: ["Starred.", "{n} conversations starred."], unstar: ["Unstarred.", "{n} conversations unstarred."] }[op];
+    if (said) toast(txn(list.length, ...said), { undo: true });
+  }
 }
 
 const INVERSE = { read: "unread", unread: "read", star: "unstar", unstar: "star", inbox: "archive" };
@@ -1760,7 +1776,7 @@ async function archiveAllFrom(m, from) {
   const wasOpen = rows.some(t => key(t) === state.open?.key);
   act("archive", rows);
   if (wasOpen) leaveConversation();
-  toast(rows.length > 1 ? tx("Archived {n} conversations from {sender}.", { n: fmtNum(rows.length), sender: from }) : tx("Archived."));
+  toast(rows.length > 1 ? tx("Archived {n} conversations from {sender}.", { n: fmtNum(rows.length), sender: from }) : tx("Archived."), { undo: true });
   return true;
 }
 
@@ -2313,7 +2329,7 @@ function assistantActed({ op, items }) {
     unread: ["Assistant marked {n} conversation unread.", "Assistant marked {n} conversations unread."],
     star: ["Assistant starred {n} conversation.", "Assistant starred {n} conversations."],
     unstar: ["Assistant unstarred {n} conversation.", "Assistant unstarred {n} conversations."] }[op];
-  toast(txn(items.length, ...said));
+  toast(txn(items.length, ...said), { undo: true });
   if (op === "archive") {
     for (const { t } of lastAction.items) { const v = state.views.get(key(t)); if (v) dropView(v); }
   }
