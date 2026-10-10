@@ -88,7 +88,7 @@ not know, leave a clearly marked placeholder and point it out.
 The panel is narrow. Answer in a few plain sentences, in the language the person writes to you in. Use a short \
 list only when the content is a list. Do not paste long tables of emails into the chat; show them in the app.";
 
-fn tools() -> Value {
+pub(crate) fn tools() -> Value {
     json!([
         {
             "name": "query_mail",
@@ -143,7 +143,8 @@ Use it before answering a question about a specific conversation or drafting a r
             "name": "apply_action",
             "description": "Change conversations in the person's mailbox. This is sent to Gmail. Only call it for a change the person asked for. \
 The action applies to the whole conversation each message belongs to. Give either message_ids, or sql: a SELECT over `mail` whose first column is message_id. \
-`archive` removes the conversation from the inbox (it stays in All Mail). Conversations that are not in the inbox are left alone. \
+`archive` removes the conversation from the inbox (it stays in All Mail); conversations that are not in the inbox are left alone by it. \
+Marking read or unread and starring work on archived conversations too. \
 The result says how many conversations were changed.",
             "input_schema": {
                 "type": "object",
@@ -500,7 +501,7 @@ impl App {
     }
 
     // ---- tools ---------------------------------------------------------------
-    fn run_tool(&self, name: &str, input: &Value) -> Result<String> {
+    pub(crate) fn run_tool(&self, name: &str, input: &Value) -> Result<String> {
         match name {
             "query_mail" => {
                 let sql = input["sql"].as_str().ok_or_else(|| anyhow!("sql is required"))?;
@@ -527,6 +528,10 @@ impl App {
             "read_conversation" => {
                 let account_id = input["account_id"].as_i64().ok_or_else(|| anyhow!("account_id is required"))?;
                 let thread_id = digits(input["thread_id"].as_str().unwrap_or_default())?;
+                // archived mail is only listed until someone wants to read it: fetch it now
+                if let Err(e) = self.hydrate_thread(account_id, &thread_id) {
+                    self.log(&format!("fetching a conversation to read: {e:#}"));
+                }
                 let (columns, rows, _) = self.db.agent_query(
                     &format!(
                         "SELECT message_id, date_local, from_name, from_addr, to_addrs, cc_addrs, subject, body_text, \
@@ -565,7 +570,7 @@ impl App {
                 // lets the window offer undo for it
                 self.emit("agent-acted", &json!({ "op": op, "items": items }).to_string());
                 Ok(format!(
-                    "{} applied to {changed} conversation(s); {} were not in the inbox and were left alone.",
+                    "{} applied to {changed} conversation(s); {} needed no change and were left alone.",
                     input["action"].as_str().unwrap_or(op),
                     keys.len() - changed
                 ))

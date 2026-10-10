@@ -62,6 +62,33 @@ delete. Errors are kept in the conversation so they can be looked at later.
 It is optional and needs an Anthropic API key (panel → Settings). The endpoint can be
 changed there too. Mail it reads to answer a question is sent to that endpoint.
 
+## For other assistants (MCP)
+
+Unibox is also an [MCP](https://modelcontextprotocol.io) server, so Claude Desktop, Cowork
+or Claude Code can work with every account at once instead of one Gmail connector each. It
+offers the built-in assistant's tools (`query_mail`, `read_conversation`, `apply_action`,
+`draft_reply`, `show_conversations`) plus `list_accounts`. Like the assistant, it cannot send
+or delete. Unibox has to be open; nothing is exposed beyond this PC.
+
+For Claude Desktop and Cowork, add this to `claude_desktop_config.json` (Settings → Developer
+→ Edit Config) and restart Claude:
+
+```json
+{
+  "mcpServers": {
+    "unibox": {
+      "command": "C:\\Users\\YOU\\AppData\\Local\\Programs\\Unibox\\unibox.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+`unibox.exe --mcp` speaks MCP on stdin/stdout and passes each message to the open app. A
+client that can reach `http://127.0.0.1:47821/mcp` itself (Claude Code on Windows:
+`claude mcp add --transport http unibox http://127.0.0.1:47821/mcp`) needs no helper. That
+address refuses web pages: requests carrying a browser's `Origin` are turned away.
+
 ## Requirements
 
 - 64-bit Windows 10 or 11 with the WebView2 runtime (part of Windows 11; a free download
@@ -143,5 +170,6 @@ Open `http://127.0.0.1:47921/` and add any address with any password (`wrong` is
 | `src/db.rs` | SQLite schema and queries |
 | `src/secrets.rs` | Passwords and keys in the Windows Credential Manager |
 | `src/agent.rs` | The assistant: model loop, tools, draft building |
+| `src/mcp.rs` | The same tools for other assistants, over MCP |
 | `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary) |
 | `tests/` | The pretend Gmail and Claude servers |

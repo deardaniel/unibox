@@ -4,6 +4,7 @@
 mod agent;
 mod db;
 mod imap;
+mod mcp;
 mod mime;
 mod secrets;
 mod sync;
@@ -589,6 +590,15 @@ async fn local_only(headers: HeaderMap, method: Method, req: Request, next: Next
     if !["127.0.0.1", "localhost"].contains(&name) {
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
+    // The MCP endpoint is for programs, not pages: a browser always names the page behind a
+    // POST in Origin, and a JSON content type cannot be sent cross-site without asking first.
+    if req.uri().path() == "/mcp" {
+        let json = headers.get(header::CONTENT_TYPE).and_then(|h| h.to_str().ok()).is_some_and(|t| t.starts_with("application/json"));
+        if headers.contains_key(header::ORIGIN) || !json {
+            return (StatusCode::FORBIDDEN, "forbidden").into_response();
+        }
+        return next.run(req).await;
+    }
     if method != Method::GET {
         let origin = headers.get(header::ORIGIN).and_then(|h| h.to_str().ok());
         let same = origin.map(|o| o == format!("http://{host}"));
@@ -597,6 +607,15 @@ async fn local_only(headers: HeaderMap, method: Method, req: Request, next: Next
         }
     }
     next.run(req).await
+}
+
+/// MCP over HTTP: one JSON-RPC message (or a batch) in, its answer out. See `mcp`.
+async fn mcp_message(State(app): State<Arc<App>>, Json(body): Json<serde_json::Value>) -> Api<Response> {
+    let reply = blocking(move || Ok(app.mcp(&body))).await?;
+    Ok(match reply {
+        Some(reply) => Json(reply).into_response(),
+        None => StatusCode::ACCEPTED.into_response(),
+    })
 }
 
 fn router(app: Arc<App>) -> Router {
@@ -619,6 +638,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/unarchive", post(unarchive))
         .route("/api/subscriptions", get(subscriptions))
+        .route("/mcp", post(mcp_message))
         .route("/api/agent", get(agent_view).post(agent_send))
         .route("/api/agent/reset", post(agent_reset))
         .route("/api/agent/stop", post(agent_stop))
@@ -977,6 +997,10 @@ fn main() -> anyhow::Result<()> {
     let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let serve_only = args.iter().any(|a| a == "--serve");
     let port: u16 = flag("--port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+    if args.iter().any(|a| a == "--mcp") {
+        // started by another program to talk MCP over stdin/stdout; the open app does the work
+        return mcp::stdio(port);
+    }
     let dir = flag("--data")
         .map(PathBuf::from)
         .or_else(|| dirs::data_local_dir().map(|d| d.join("Unibox")))
