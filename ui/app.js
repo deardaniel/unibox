@@ -28,7 +28,7 @@ const state = {
   collection: null,      // { title }: the list is showing a set the assistant picked
   unreadOnly: false,     // list only conversations with something unread
   kept: new Set(),       // thread keys opened while unreadOnly is on; they stay listed once read
-  kind: "",              // "people" or "automated" to list only mail a person wrote, or only what systems sent
+  kind: "",              // "people" or "automated" when the other of the two is switched off
   all: false,            // list All Mail (archived and sent mail too), not only the inbox
 };
 const key = t => t.account_id + ":" + t.thrid;
@@ -307,7 +307,13 @@ function showListFilters() {
   $("#unread-only").classList.toggle("on", state.unreadOnly);
   $("#unread-only").setAttribute("aria-pressed", state.unreadOnly);
   for (const b of $("#scope").children) b.classList.toggle("on", !!b.dataset.all === state.all);
-  for (const b of $("#kind").children) b.classList.toggle("on", b.dataset.kind === state.kind);
+  // people and automated mail are each switched on or off; with one off, the other is a filter
+  for (const b of $("#kind").children) {
+    const on = !state.kind || b.dataset.kind === state.kind;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on);
+  }
+  $("#kind").classList.toggle("narrowed", !!state.kind);
   $("#search").placeholder = state.all ? "Search all mail  ( / )" : "Search the inbox  ( / )";
 }
 function setListFilter(name, on) {
@@ -1638,7 +1644,15 @@ function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
 $("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
 $("#scope").onclick = e => { const b = e.target.closest("button"); if (!b) return; b.blur(); if (!!b.dataset.all !== state.all) setListFilter("all", !!b.dataset.all); };
-$("#kind").onclick = e => { const b = e.target.closest("button"); if (!b) return; b.blur(); if (b.dataset.kind !== state.kind) setListFilter("kind", b.dataset.kind); };
+$("#kind").onclick = e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  b.blur();
+  // switching one off leaves the other; they are never both off, so switching off the only
+  // one showing brings the other back instead
+  const other = b.dataset.kind === "people" ? "automated" : "people";
+  setListFilter("kind", state.kind === other ? "" : other);
+};
 $("#unread-only").onclick = e => { e.currentTarget.blur(); setListFilter("unreadOnly", !state.unreadOnly); };
 $("#help").onclick = () => $("#help-dialog").showModal();
 // The same dialog adds an account or, given one, replaces its saved app password.

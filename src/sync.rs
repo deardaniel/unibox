@@ -474,19 +474,20 @@ impl App {
         }
         while at.low > 1 && Instant::now() < deadline {
             let from = at.low.saturating_sub(INDEX_CHUNK).max(1);
-            self.index_range(imap, account_id, from, at.low - 1)?;
+            let oldest = self.index_range(imap, account_id, from, at.low - 1)?;
             at.low = from;
             self.db.set_all_mail(account_id, &at)?;
-            let so_far: i64 =
-                self.db.conn()?.query_row("SELECT COUNT(*) FROM messages WHERE all_uid IS NOT NULL", [], |r| r.get(0))?;
-            self.set_activity(&format!("Listing older mail… {} so far", thousands(so_far)));
+            if let Some(oldest) = oldest {
+                self.set_activity(&format!("Listing older mail… back to {}", month_year(oldest)));
+            }
             self.emit("indexed", email);
         }
         Ok(at.low > 1)
     }
 
-    /// List the All Mail messages with UIDs `from..=to`. Drafts are left out.
-    fn index_range(&self, imap: &mut Imap, account_id: i64, from: u32, to: u32) -> Result<()> {
+    /// List the All Mail messages with UIDs `from..=to`. Drafts are left out. Returns when the
+    /// oldest of them arrived.
+    fn index_range(&self, imap: &mut Imap, account_id: i64, from: u32, to: u32) -> Result<Option<i64>> {
         let fetched = imap.uid_fetch(&format!("{from}:{to}"), INDEX_ITEMS)?;
         let mut c = self.db.conn()?;
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -508,7 +509,7 @@ impl App {
             )?;
         }
         tx.commit()?;
-        Ok(())
+        Ok(fetched.iter().filter_map(|f| parse_internaldate(&f.get("INTERNALDATE")?.text())).min())
     }
 
     /// Check the listed All Mail messages with UIDs `from..=to` against the server: take on
@@ -958,17 +959,20 @@ fn fetched_flags(f: &Fetched) -> (bool, bool) {
     (flags.iter().any(|x| x == "\\seen"), flags.iter().any(|x| x == "\\flagged"))
 }
 
-/// 1234567 as "1,234,567".
-fn thousands(n: i64) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, d) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(d);
-    }
-    out
+/// Unix seconds as "March 2019" (UTC; near enough for saying how far back something goes).
+fn month_year(secs: i64) -> String {
+    // days since 1970 to a civil date, after Howard Hinnant's algorithm
+    let z = secs.div_euclid(86400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    const NAMES: [&str; 12] =
+        ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    format!("{} {year}", NAMES[(month - 1) as usize])
 }
 
 fn is_draft(f: &Fetched) -> bool {
@@ -1008,4 +1012,15 @@ fn store_fetched_body(c: &rusqlite::Connection, account_id: i64, f: &Fetched) ->
     let s = mime::summarize(raw);
     Db::store_body(c, account_id, &msgid.text(), raw, &s)?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod progress_tests {
+    #[test]
+    fn says_how_far_back() {
+        assert_eq!(super::month_year(0), "January 1970");
+        assert_eq!(super::month_year(1_551_398_400), "March 2019");
+        assert_eq!(super::month_year(1_582_934_400), "February 2020"); // 29 Feb
+        assert_eq!(super::month_year(1_798_761_599), "December 2026");
+    }
 }

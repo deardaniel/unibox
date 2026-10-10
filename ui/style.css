@@ -151,6 +151,10 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 /* the usual choice (the first) is marked quietly; anything else stands out, as a filter that is on */
 .seg button.on { background: var(--hover); font-weight: 600; }
 .seg button.on:not(:first-child) { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
+/* two switches, both on unless one kind of mail is being left out */
+#kind button { color: var(--muted); }
+#kind button.on { background: var(--hover); font-weight: 600; color: inherit; border-color: var(--line); }
+#kind.narrowed button.on { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
 body.solo #unread-only, body.solo .seg { display: none; }
 #assistant { flex: none; width: 380px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
 #assistant[hidden] { display: none; }
