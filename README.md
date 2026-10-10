@@ -12,10 +12,13 @@ triage: replying opens the conversation in Gmail.
   text, from a full-text index.
 - The whole list is there at once (no "load more"), with a count of conversations and
   unread beneath it.
-- All Mail (`g` `a`) lists everything, archived and sent mail too; `g` `i` goes back to the
-  inbox. A conversation there can be moved back to the inbox.
-- Narrow the list to unread only (`f`), and to mail a person wrote or mail systems sent
-  (People and Automated are each switched on or off; `F` steps through). On the bar, filled means on.
+- The search field says where it is looking, Inbox or All mail (archived and sent mail
+  too): click the label, or `g` `a` / `g` `i`. A conversation in All mail can be moved back
+  to the inbox.
+- Filters are off unless switched on: Unread (`f`), and People or Automated (`F` steps
+  through). Each one that is on shows as a removable piece in the search field, and they can
+  be typed there too: `is:unread`, `from:people`, `from:automated`, `in:all`, and
+  `from:` any sender, with suggestions as you type.
 - Archive, read/unread and star are written back to Gmail. `z` undoes.
 - Gmail's keyboard shortcuts: `j`/`k`, `o`, `u`, `e`, `s`, `x`, `/` and the rest. Press `?`
   in the app for the list.

@@ -360,6 +360,7 @@ impl Db {
         kind: &str,
         keep: &str,
         all_mail: bool,
+        from: &str,
     ) -> Result<Vec<ThreadRow>> {
         let c = self.conn()?;
         // ?2 is what to look for: words for the search index when it can answer, otherwise a
@@ -396,6 +397,9 @@ impl Db {
               WHERE (?6=1 OR in_inbox=1)
                 AND (?1 IS NULL OR account_id=?1)
                 AND {matching}
+                -- from a sender: part of an address, a whole one, or a domain
+                AND (?7='' OR (m.account_id, m.gm_thrid) IN (
+                       SELECT f.account_id, f.gm_thrid FROM messages f WHERE f.from_addr LIKE '%' || ?7 || '%' ESCAPE '\\'))
               GROUP BY account_id, gm_thrid
              HAVING (?3=0 OR SUM(seen=0)>0
                      OR (account_id || ':' || gm_thrid) IN (SELECT value FROM json_each(?4)))
@@ -404,7 +408,8 @@ impl Db {
                             ELSE 1 END
               ORDER BY newest DESC"
         ))?;
-        let rows = st.query_map(params![account, wanted, unread_only, keep, kind, all_mail], |r| {
+        let from = from.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let rows = st.query_map(params![account, wanted, unread_only, keep, kind, all_mail, from], |r| {
             Ok(ThreadRow {
                 account_id: r.get(0)?,
                 thrid: r.get(1)?,
@@ -597,6 +602,22 @@ impl Db {
                 "unsubscribed": r.get::<_, bool>(9)?,
             }))
         })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The senders whose address or name contains `q`, the ones with most mail first:
+    /// (address, name as last used, how many messages).
+    pub fn senders(&self, q: &str, limit: i64) -> Result<Vec<(String, String, i64)>> {
+        let c = self.conn()?;
+        let like = format!("%{}%", q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        // (the name comes from each sender's newest message)
+        let mut st = c.prepare(
+            "SELECT lower(from_addr), from_name, COUNT(*), MAX(date) FROM messages
+              WHERE from_addr <> '' AND (from_addr LIKE ?1 ESCAPE '\\' OR from_name LIKE ?1 ESCAPE '\\')
+                AND lower(from_addr) NOT IN (SELECT lower(email) FROM accounts)
+              GROUP BY lower(from_addr) ORDER BY COUNT(*) DESC LIMIT ?2",
+        )?;
+        let rows = st.query_map(params![like, limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -855,7 +876,7 @@ mod tests {
         };
         add("1", "1", "Your receipt for the bouncy castle", true);
         add("2", "2", "Minutes of the meeting", false);
-        let found = |q: &str, all: bool| db.threads(None, q, false, "", "[]", all).unwrap().len();
+        let found = |q: &str, all: bool| db.threads(None, q, false, "", "[]", all, "").unwrap().len();
         // before the index is built, and after: the same answers
         for built in [false, true] {
             if built {
@@ -867,6 +888,8 @@ mod tests {
             assert_eq!(found("minutes", true), 1);
             assert_eq!(found("pay.example", true), 2);
             assert_eq!(found("", true), 2);
+            let from = |who: &str| db.threads(None, "", false, "", "[]", true, who).unwrap().len();
+            assert_eq!((from("pay.example"), from("RECEIPTS@pay"), from("pay_example"), from("nobody")), (2, 2, 0, 0));
         }
         c.execute("UPDATE messages SET body_text='the deposit was refunded' WHERE gm_msgid='2'", []).unwrap();
         assert_eq!(found("deposit refunded", true), 1);

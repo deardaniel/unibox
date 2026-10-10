@@ -28,7 +28,8 @@ const state = {
   collection: null,      // { title }: the list is showing a set the assistant picked
   unreadOnly: false,     // list only conversations with something unread
   kept: new Set(),       // thread keys opened while unreadOnly is on; they stay listed once read
-  kind: "",              // "people" or "automated" when the other of the two is switched off
+  kind: "",              // "people" or "automated": only mail a person wrote, or only what systems sent
+  from: "",              // only mail from this sender: an address, part of one, or a domain
   all: false,            // list All Mail (archived and sent mail too), not only the inbox
 };
 const key = t => t.account_id + ":" + t.thrid;
@@ -297,25 +298,58 @@ function listParams() {
   if (state.unreadOnly) { p.set("unread", true); p.set("keep", [...state.kept].join(",")); }
   if (state.kind) p.set("kind", state.kind);
   if (state.all) p.set("all", true);
+  if (state.from) p.set("from", state.from);
   return p;
 }
 
-/** What the list is narrowed to, in the bar above it: where (the inbox, or All Mail), only
- *  unread (conversations opened while it is on stay listed), and who wrote it. */
+/** What the list is narrowed to, shown in the bar above it. Nothing switched on means no
+ *  filter. Where it looks (the inbox, or all mail) is the label at the start of the search
+ *  field; each filter that is on is a removable piece inside the field as well as a lit
+ *  button: only unread (conversations opened meanwhile stay listed), only people or only
+ *  automated mail (one or neither), and one sender. */
 const KINDS = ["", "people", "automated"];
-const KIND_FROM = { people: "from people", automated: "from automated senders" };
 function showListFilters() {
-  $("#unread-only").classList.toggle("on", state.unreadOnly);
   $("#unread-only").setAttribute("aria-pressed", state.unreadOnly);
-  for (const b of $("#scope").children) b.classList.toggle("on", !!b.dataset.all === state.all);
-  // people and automated mail are each switched on or off; with one off, the other is a filter
-  for (const b of $("#kind").children) {
-    const on = !state.kind || b.dataset.kind === state.kind;
-    b.classList.toggle("on", on);
-    b.setAttribute("aria-pressed", on);
-  }
-  $("#search").placeholder = state.all ? "Search all mail  ( / )" : "Search the inbox  ( / )";
+  for (const b of $("#kind").children) b.setAttribute("aria-pressed", b.dataset.kind === state.kind);
+  const scope = $("#scope");
+  scope.firstElementChild.textContent = state.all ? "All mail" : "Inbox";
+  scope.setAttribute("aria-pressed", state.all);
+  scope.title = state.all ? "Looking in all mail, archived and sent too. Click for just the inbox (g then i)"
+    : "Looking in the inbox. Click for all mail, archived and sent too (g then a)";
+  const box = $("#tokens");
+  box.textContent = "";
+  const piece = (text, off) => {
+    const t = el("span", "token", text), x = el("button", "", "×");
+    x.title = x.ariaLabel = "Remove " + text;
+    x.onclick = e => { e.stopPropagation(); off(); $("#search").focus(); };
+    t.append(x);
+    box.append(t);
+  };
+  if (state.unreadOnly) piece("is:unread", () => setListFilter("unreadOnly", false));
+  if (state.kind) piece("from:" + state.kind, () => setListFilter("kind", ""));
+  if (state.from) piece("from:" + state.from, () => setListFilter("from", ""));
 }
+
+/** Take the filters out of what was typed in the search field, leaving the words to search
+ *  for. A piece counts once it is finished: followed by a space, or everything when `done`
+ *  (Enter, or a suggestion chosen). Returns { text, changed }. */
+function takeFilters(text, done) {
+  const words = text.split(/\s+/).filter(Boolean), keep = [];
+  const typing = !done && !/\s$/.test(text) ? words.pop() : null;   // the word still being typed
+  let changed = false;
+  for (const w of words) {
+    const m = /^(is|in|from):(.+)$/i.exec(w), what = m && m[1].toLowerCase(), value = m && m[2].toLowerCase();
+    if (what === "is" && value === "unread") state.unreadOnly = true;
+    else if (what === "in" && (value === "all" || value === "inbox")) state.all = value === "all";
+    else if (what === "from" && KINDS.includes(value)) state.kind = value;
+    else if (what === "from") state.from = value;
+    else { keep.push(w); continue; }
+    changed = true;
+  }
+  if (typing != null) keep.push(typing);
+  return { text: changed ? keep.join(" ") : text, changed };
+}
+
 function setListFilter(name, on) {
   leaveCollection();
   state[name] = on;
@@ -363,11 +397,11 @@ function renderListFoot() {
   if (!foot) { foot = el("div"); foot.id = "list-foot"; }
   $("#list").append(foot);
   const c = { total: state.threads.length, unread: state.threads.filter(t => t.unread).length }, n = x => x.toLocaleString();
+  // what is showing, in words: where, then each filter that is on
+  const where = state.filter == null ? (state.all ? "All mail" : "All inboxes") : (account(state.filter)?.email || "Inbox") + (state.all ? ", all mail" : "");
   const what = state.collection ? state.collection.title
-    : (state.q ? `Search in ${state.filter == null ? (state.all ? "all mail" : "all inboxes") : account(state.filter)?.email}`
-      : state.filter == null ? (state.all ? "All Mail" : "All inboxes") : account(state.filter)?.email || "Inbox")
-      + (state.all && state.filter != null ? ", all mail" : "")
-      + (state.kind ? `, ${state.kind} only` : "") + (state.unreadOnly ? ", unread only" : "");
+    : [where, state.q && `“${state.q}”`, state.unreadOnly && "unread only", state.kind === "people" && "from people",
+       state.kind === "automated" && "automated only", state.from && `from ${state.from}`].filter(Boolean).join(" · ");
   // All Mail is listed in the background, newest first; say so while older mail is still coming
   const loading = state.all && !state.collection && state.accounts.some(a => a.indexing && (state.filter == null || a.id === state.filter));
   foot.textContent = "";
@@ -400,9 +434,7 @@ function renderList() {
   if (!state.threads.length) {
     list.append(el("div", "empty",
       !state.accounts.length ? "Add a Gmail account to get started."
-        : state.unreadOnly ? (state.q ? "Nothing unread matches that search." : state.kind ? `Nothing unread ${KIND_FROM[state.kind]}.` : "Nothing unread.")
-        : state.kind ? (state.q ? `Nothing ${KIND_FROM[state.kind]} matches that search.` : `Nothing ${KIND_FROM[state.kind]} ${state.all ? "here" : "in the inbox"}.`)
-        : state.q ? "Nothing in the inbox matches that search."
+        : state.q || state.unreadOnly || state.kind || state.from ? `Nothing in ${state.all ? "all mail" : "the inbox"} matches.`
         : state.accounts.some(a => !a.last_sync) ? "Fetching your inbox…" : "Inbox zero."));
     renderListFoot();
     return;
@@ -882,7 +914,8 @@ async function openSubscriptions() {
       dialog.close();
       leaveCollection();
       state.all = true; state.unreadOnly = false; state.kind = ""; state.filter = r.account_id;
-      state.q = $("#search").value = r.from_addr;
+      state.q = $("#search").value = "";
+      state.from = r.from_addr.toLowerCase();
       state.cursor = 0; state.selected.clear();
       showListFilters(); renderAccounts(); hideView(); loadThreads(true);
     };
@@ -1518,7 +1551,7 @@ let gPending = 0, starPending = 0;
 function goInbox() {
   $("#search").value = "";
   state.q = "";
-  state.unreadOnly = state.all = false; state.kind = "";
+  state.unreadOnly = state.all = false; state.kind = state.from = "";
   state.kept = new Set();
   showListFilters();
   setFilter(null);   // also leaves any set the assistant was showing
@@ -1623,12 +1656,106 @@ function onKey(e) {
 }
 document.addEventListener("keydown", onKey);
 
+// ---- the search field -------------------------------------------------------------
 let searchTimer;
-$("#search").addEventListener("input", e => {
+function searchNow() {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { leaveCollection(); state.q = e.target.value.trim(); state.cursor = 0; hideView(); loadThreads(true); }, 200);
+  leaveCollection();
+  // a filter still being typed ("from:eco") is not something to search the text for
+  state.q = $("#search").value.replace(/(^|\s)(is|in|from):\S*$/i, "").trim();
+  state.cursor = 0;
+  state.kept = new Set();
+  hideView();
+  loadThreads(true);
+}
+/** Read the field after it changed: filters typed in full become pieces, the rest is searched for. */
+function readSearch(done) {
+  const field = $("#search"), took = takeFilters(field.value, done);
+  if (took.changed) { field.value = took.text; showListFilters(); }
+  clearTimeout(searchTimer);
+  if (took.changed || done) searchNow();
+  else searchTimer = setTimeout(searchNow, 200);
+}
+
+// Suggestions while a filter is being typed: the fixed ones, and after "from:" the senders
+// that match. Up and Down choose, Tab or Enter takes one, Esc puts the list away.
+const FILTER_WORDS = [["is:unread", "Only unread"], ["from:people", "Only what people wrote"],
+  ["from:automated", "Only newsletters, receipts, notices"], ["in:all", "Look in all mail"], ["in:inbox", "Look in the inbox"]];
+const suggest = { items: [], at: 0, asked: 0 };
+function closeSuggest() { suggest.items = []; $("#suggest").hidden = true; }
+function drawSuggest() {
+  const box = $("#suggest");
+  box.textContent = "";
+  box.hidden = !suggest.items.length;
+  let senders = false;
+  suggest.items.forEach((it, i) => {
+    if (it.sender && !senders) { senders = true; box.append(el("div", "group", "Senders")); }
+    const row = el("div", "opt" + (i === suggest.at ? " at" : ""));
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", i === suggest.at);
+    const cut = it.word.indexOf(":") + 1, word = el("span", "word");
+    word.append(el("b", "", it.word.slice(0, cut)), it.word.slice(cut));
+    row.append(word, el("span", "hint", it.hint));
+    row.onpointerdown = e => { e.preventDefault(); takeSuggestion(i); };
+    box.append(row);
+  });
+  if (suggest.items.length) box.append(el("div", "keys", "↑↓ choose   Tab take   Esc close"));
+}
+async function updateSuggest() {
+  const field = $("#search");
+  // only for the word at the end of the field, and only once it names a kind of filter
+  const word = field.selectionStart === field.value.length ? (/(?:^|\s)(\S+)$/.exec(field.value)?.[1] || "") : "";
+  const lower = word.toLowerCase();
+  if (!/^(is|in|from):/.test(lower)) return closeSuggest();
+  const fixed = FILTER_WORDS.filter(([w]) => w.startsWith(lower) && w !== lower).map(([w, hint]) => ({ word: w, hint }));
+  suggest.items = fixed;
+  suggest.at = 0;
+  drawSuggest();
+  if (!lower.startsWith("from:")) return;
+  const asked = ++suggest.asked;
+  const found = await api("/api/senders?" + new URLSearchParams({ q: word.slice(5) })).catch(() => []);
+  if (asked !== suggest.asked || $("#search").value !== field.value || document.activeElement !== field) return;
+  suggest.items = [...fixed, ...found.map(f => ({ word: "from:" + f.addr, hint: f.name && f.name.toLowerCase() !== f.addr ? f.name : `${f.n.toLocaleString()} message${f.n === 1 ? "" : "s"}`, sender: true }))];
+  drawSuggest();
+}
+function takeSuggestion(i) {
+  const it = suggest.items[i], field = $("#search");
+  if (!it) return;
+  field.value = field.value.replace(/\S+$/, it.word);
+  closeSuggest();
+  readSearch(true);
+  field.focus();
+}
+$("#search").addEventListener("input", () => { readSearch(false); updateSuggest(); });
+$("#search").addEventListener("blur", closeSuggest);
+$("#search").addEventListener("keydown", e => {
+  const field = e.target, open = suggest.items.length > 0;
+  if (open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+    suggest.at = (suggest.at + (e.key === "ArrowDown" ? 1 : suggest.items.length - 1)) % suggest.items.length;
+    drawSuggest();
+    e.preventDefault();
+  } else if (open && (e.key === "Tab" || e.key === "Enter")) {
+    takeSuggestion(suggest.at);
+    e.preventDefault();
+  } else if (open && e.key === "Escape") {
+    closeSuggest();
+    e.preventDefault();
+    e.stopPropagation();
+  } else if (e.key === "Enter") {
+    readSearch(true);
+    field.blur();
+    $("#list").focus();
+  } else if (e.key === "Backspace" && field.selectionStart === 0 && field.selectionEnd === 0) {
+    // at the very start: take off the piece before the cursor
+    if (state.from) setListFilter("from", "");
+    else if (state.kind) setListFilter("kind", "");
+    else if (state.unreadOnly) setListFilter("unreadOnly", false);
+    else return;
+    field.focus();
+    e.preventDefault();
+  }
 });
-$("#search").addEventListener("keydown", e => { if (e.key === "Enter") { e.target.blur(); $("#list").focus(); } });
+$("#query").addEventListener("pointerdown", e => { if (e.target === e.currentTarget || e.target.id === "tokens") { e.preventDefault(); $("#search").focus(); } });
 
 // ---- toolbar and dialogs -------------------------------------------------------
 // The sync button says what the background sync is doing: working, or counting down to the next check.
@@ -1656,15 +1783,13 @@ function renderSync() {
 function setSync(s) { Object.assign(sync, s); renderSync(); }
 setInterval(renderSync, 1000);
 $("#sync").onclick = () => { setSync({ syncing: true }); api("/api/sync", { method: "POST" }); };
-$("#scope").onclick = e => { const b = e.target.closest("button"); if (!b) return; b.blur(); if (!!b.dataset.all !== state.all) setListFilter("all", !!b.dataset.all); };
+$("#scope").onclick = e => { e.currentTarget.blur(); setListFilter("all", !state.all); };
+// people or automated: one of them, or neither
 $("#kind").onclick = e => {
   const b = e.target.closest("button");
   if (!b) return;
   b.blur();
-  // switching one off leaves the other; they are never both off, so switching off the only
-  // one showing brings the other back instead
-  const other = b.dataset.kind === "people" ? "automated" : "people";
-  setListFilter("kind", state.kind === other ? "" : other);
+  setListFilter("kind", state.kind === b.dataset.kind ? "" : b.dataset.kind);
 };
 $("#unread-only").onclick = e => { e.currentTarget.blur(); setListFilter("unreadOnly", !state.unreadOnly); };
 $("#help").onclick = () => $("#help-dialog").showModal();
@@ -1809,7 +1934,9 @@ function appState() {
     now: now.toLocaleString("sv") + " " + now.toLocaleDateString("en", { weekday: "long" }),
     accounts: state.accounts.map(a => ({ account_id: a.id, address: a.email })),
     list_is_showing: state.collection ? `the set you showed, titled "${state.collection.title}"`
-      : state.q ? `${state.all ? "all mail" : "inbox"} search results for "${state.q}"` : state.all ? "All Mail (archived and sent mail too)" : "the inbox",
+      : (state.q ? `${state.all ? "all mail" : "inbox"} search results for "${state.q}"` : state.all ? "All Mail (archived and sent mail too)" : "the inbox")
+        + (state.unreadOnly ? ", unread only" : "") + (state.kind ? `, only mail from ${state.kind === "people" ? "people" : "automated senders"}` : "")
+        + (state.from ? `, only from ${state.from}` : ""),
     account_filter: state.filter == null ? null : account(state.filter)?.email,
     conversations_listed: state.threads.length,
     open: state.open ? brief(open || { ...state.open, subject: state.open.messages[0]?.subject }) : null,
@@ -1859,7 +1986,7 @@ $("#as-setup").addEventListener("submit", async e => {
 /** The assistant picked a set of conversations: put it in the list. */
 function showCollection(title) {
   state.collection = { title };
-  state.unreadOnly = state.all = false; state.kind = "";
+  state.unreadOnly = state.all = false; state.kind = state.from = "";
   showListFilters();
   state.q = "";
   $("#search").value = "";

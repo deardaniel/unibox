@@ -20,15 +20,19 @@
 
 <main>
   <header id="top">
-    <input id="search" type="search" placeholder="Search the inbox  ( / )" autocomplete="off" spellcheck="false">
-    <div id="scope" class="seg" role="group" aria-label="Which mail to list">
-      <button data-all="" title="Only what is in the inbox (g then i)">Inbox</button>
-      <button data-all="1" title="Everything: archived and sent mail too (g then a)">All Mail</button>
+    <!-- The search field says where it is looking (click to switch), holds the filters that
+         are on as removable pieces, and takes them typed too: is:unread, from:people, from:name. -->
+    <div id="query">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <button id="scope" aria-pressed="false"><span>Inbox</span><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+      <span id="tokens"></span>
+      <input id="search" type="text" placeholder="Search  ( / )" autocomplete="off" spellcheck="false" aria-label="Search" aria-controls="suggest">
+      <div id="suggest" role="listbox" aria-label="Suggestions" hidden></div>
     </div>
-    <button id="unread-only" class="toggle" aria-pressed="false" title="Show only unread conversations (f)">Unread only</button>
-    <div id="kind" role="group" aria-label="Who wrote it">
-      <button data-kind="people" class="toggle" aria-pressed="true" title="Mail that a person wrote. Turn off to see only what systems sent (Shift+F steps through)">People</button>
-      <button data-kind="automated" class="toggle" aria-pressed="true" title="Mail that systems sent: newsletters, receipts, notifications. Turn off to see only what people wrote (Shift+F)">Automated</button>
+    <button id="unread-only" class="toggle" aria-pressed="false" title="Only unread conversations (f, or type is:unread)">Unread</button>
+    <div id="kind" class="seg" role="group" aria-label="Who wrote it: one or neither">
+      <button data-kind="people" class="toggle" aria-pressed="false" title="Only mail that a person wrote (Shift+F steps through, or type from:people)">People</button>
+      <button data-kind="automated" class="toggle" aria-pressed="false" title="Only mail that systems sent: newsletters, receipts, notifications (Shift+F, or type from:automated)">Automated</button>
     </div>
     <button id="sync" aria-label="Sync"><svg class="spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
@@ -132,7 +136,8 @@
     <tr><td><kbd>r</kbd></td><td>Reply (opens the conversation in Gmail)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search</td></tr>
     <tr><td><kbd>f</kbd></td><td>Show only unread conversations (again to show all)</td></tr>
-    <tr><td><kbd>Shift</kbd>+<kbd>f</kbd></td><td>Step through mail from people and systems / people only / systems only</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>f</kbd></td><td>Step through no filter / only people / only automated</td></tr>
+    <tr><td><kbd>is:unread</kbd> <kbd>from:people</kbd> <kbd>from:</kbd>name <kbd>in:all</kbd></td><td>The same filters, typed in the search field</tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Open the assistant</td></tr>
     <tr><td><kbd>g</kbd> then <kbd>s</kbd></td><td>Subscriptions: senders you can unsubscribe from</td></tr>
     <tr><td><kbd>g</kbd> then <kbd>a</kbd></td><td>All Mail: archived and sent mail too</td></tr>

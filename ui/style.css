@@ -2,6 +2,7 @@
   --bg: #f6f5f2; --panel: #fff; --ink: #1c1c1c; --muted: #6b6b6b; --line: #e4e2dd;
   --hover: #f0eee9; --cursor: #5b2ee8; --accent: #5b2ee8; --unread-bg: #fff; --read-bg: #f3f2ee;
   --danger: #c0392b; --ok: #2e7d4f; --warn: #a86400; --rail: 50px;
+  --tint: color-mix(in srgb, var(--accent) 11%, var(--panel));   /* behind something switched on */
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -88,8 +89,33 @@ dialog input[readonly] { color: var(--muted); }
 /* ---- main ---- */
 main { margin-left: var(--rail); height: 100%; display: flex; flex-direction: column; min-width: 0; }
 #top { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-#search { flex: 1; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
-          border-radius: 6px; padding: 6px 10px; min-width: 0; }
+/* The search field: a magnifier, where it is looking, the filters that are on, then what is typed. */
+#query { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 10px;
+         background: var(--panel); border: 1px solid var(--line); border-radius: 8px; cursor: text; }
+#query:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#query > svg { flex: none; color: var(--muted); }
+#scope { flex: none; display: flex; align-items: center; gap: 3px; height: 24px; padding: 0 5px 0 8px; border: 0; border-radius: 5px;
+         background: var(--hover); font-weight: 600; font-size: 13px; white-space: nowrap; }
+#scope svg { color: var(--muted); }
+#scope:hover:where(:not(:disabled)) { background: var(--line); }
+#scope[aria-pressed="true"] { background: var(--tint); color: var(--accent); }
+#scope[aria-pressed="true"] svg { color: inherit; }
+#tokens { display: contents; }
+.token { flex: none; display: flex; align-items: center; height: 24px; padding: 0 2px 0 8px; border-radius: 5px; white-space: nowrap;
+         background: var(--tint); color: var(--accent); font: 12.5px "Cascadia Mono", Consolas, ui-monospace, monospace; max-width: 40%; }
+.token button { flex: none; width: 20px; height: 20px; margin-left: 2px; padding: 0; border: 0; border-radius: 4px; background: none;
+                color: inherit; font: 15px/1 system-ui, sans-serif; display: grid; place-items: center; }
+.token button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+#search { flex: 1; min-width: 60px; height: 100%; font: inherit; color: inherit; background: none; border: 0; outline: 0; padding: 0; }
+#suggest { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; width: min(460px, 100%); padding: 5px;
+           background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.18); cursor: default; }
+#suggest .opt { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 32px; padding: 0 9px; border-radius: 6px; }
+#suggest .opt.at, #suggest .opt:hover { background: var(--tint); }
+#suggest .word { font: 13px "Cascadia Mono", Consolas, ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#suggest .word b { color: var(--accent); font-weight: 600; }
+#suggest .hint { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+#suggest .group { padding: 6px 9px 2px; margin-top: 4px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+#suggest .keys { padding: 6px 9px 3px; color: var(--muted); font-size: 11.5px; white-space: pre; }
 /* The sync button's border fills clockwise as the next automatic check approaches.
    --p is how far along the wait is, 0 to 1. */
 @property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
@@ -141,21 +167,17 @@ body:not(.reading) #thread-bar { visibility: hidden; }
 /* ---- assistant ---- */
 #ask { display: grid; place-items: center; width: 34px; padding: 0; color: var(--accent); }
 #ask.on { background: var(--hover); }
-/* The bar's switches all speak one way: filled means on, plain means off.
-   A choice of one (Inbox / All Mail) is a joined pair with the chosen side filled.
-   A switch that is on or off by itself (Unread only, People, Automated) is a button of its own,
-   filled and ticked while on. */
+/* The bar's filter buttons: plain while off, tinted with the accent while on (a filter in
+   force, not a mode), the same as the pieces in the search field. People and Automated are a
+   joined pair because at most one of them is on. */
 .seg { display: flex; flex: none; }
-.seg button { padding: 0 12px; border-radius: 0; margin-left: -1px; white-space: nowrap; }
+.seg button { border-radius: 0; margin-left: -1px; }
 .seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
 .seg button:last-child { border-radius: 0 8px 8px 0; }
-.seg button.on, .toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
-.seg button.on:hover, .toggle[aria-pressed="true"]:hover { background: var(--accent); filter: brightness(1.12); }
-#kind { display: flex; flex: none; gap: 8px; }
-.toggle { padding: 0 12px; white-space: nowrap; color: var(--muted); }
-.toggle::before { content: "✓"; display: inline-block; width: 0; opacity: 0; overflow: hidden; vertical-align: bottom;
-  transition: width .12s ease, opacity .12s ease; }
-.toggle[aria-pressed="true"]::before { width: 1.05em; opacity: 1; }
+.toggle { padding: 0 12px; white-space: nowrap; }
+.toggle[aria-pressed="true"] { background: var(--tint); border-color: var(--accent); color: var(--accent); font-weight: 600;
+  position: relative; }
+.toggle[aria-pressed="true"]:hover { background: var(--tint); filter: brightness(.97); }
 body.solo #unread-only, body.solo .seg, body.solo #kind { display: none; }
 #assistant { flex: none; width: 380px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
 #assistant[hidden] { display: none; }

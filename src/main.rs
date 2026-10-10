@@ -163,6 +163,9 @@ struct ThreadQuery {
     /// List everything in All Mail, not only what is in the inbox.
     #[serde(default)]
     all: bool,
+    /// Only conversations with mail from this sender: an address, part of one, or a domain.
+    #[serde(default)]
+    from: String,
 }
 
 /// The list goes out as one array per conversation rather than an object, in the order of
@@ -175,7 +178,7 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
             return app.db.threads_by_keys(&keys);
         }
         let keep: Vec<&str> = q.keep.split(',').filter(|k| !k.is_empty()).collect();
-        app.db.threads(q.account, q.q.trim(), q.unread, &q.kind, &serde_json::to_string(&keep)?, q.all)
+        app.db.threads(q.account, q.q.trim(), q.unread, &q.kind, &serde_json::to_string(&keep)?, q.all, q.from.trim())
     })
     .await?;
     Ok(Json(
@@ -356,6 +359,18 @@ struct SubscriptionQuery {
 /// Every sender that offers a way to unsubscribe, with how much it sends.
 async fn subscriptions(State(app): State<Arc<App>>, Query(q): Query<SubscriptionQuery>) -> Api<Json<Vec<serde_json::Value>>> {
     Ok(Json(blocking(move || app.db.subscriptions(q.account)).await?))
+}
+
+#[derive(Deserialize)]
+struct SenderQuery {
+    #[serde(default)]
+    q: String,
+}
+
+/// Senders matching what has been typed after "from:", for the search field's suggestions.
+async fn senders(State(app): State<Arc<App>>, Query(q): Query<SenderQuery>) -> Api<Json<Vec<serde_json::Value>>> {
+    let found = blocking(move || app.db.senders(q.q.trim(), 6)).await?;
+    Ok(Json(found.into_iter().map(|(addr, name, n)| serde_json::json!({ "addr": addr, "name": name, "n": n })).collect()))
 }
 
 /// Leave a mailing list by the sender's own one-click address, and remember having done so.
@@ -641,6 +656,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/unarchive", post(unarchive))
         .route("/api/subscriptions", get(subscriptions))
+        .route("/api/senders", get(senders))
         .route("/mcp", post(mcp_message))
         .route("/api/agent", get(agent_view).post(agent_send))
         .route("/api/agent/reset", post(agent_reset))
