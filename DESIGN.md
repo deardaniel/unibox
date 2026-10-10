@@ -24,8 +24,12 @@ to use them.
 
 ## Tokens
 
-Use a token for every colour, size, radius, shadow and duration. A raw hex value belongs only in
-`:root`. The one exception is account colours, which come from the database (`--c`).
+Use a token for every colour, font size, radius, shadow and duration, in `ui/style.css` and in
+`ui/app.js` alike. A raw colour belongs only in `:root`; account colours, which come from the
+database (`--c`), are the one exception.
+
+Spacing on the 4 px grid uses `--s1`–`--s6`. Component dimensions (column widths, icon sizes,
+a deliberate off-grid padding) may stay literal: snapping them would move things for no gain.
 
 ```css
 :root {
@@ -54,7 +58,7 @@ Use a token for every colour, size, radius, shadow and duration. A raw hex value
   /* type */
   --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
   --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
-  --fs-caption: 12px; --fs-small: 13px; --fs-body: 14px; --fs-subtitle: 16px; --fs-title: 20px; --fs-mono: 12.5px;
+  --fs-key: 11px; --fs-caption: 12px; --fs-small: 13px; --fs-body: 14px; --fs-subtitle: 16px; --fs-title: 20px; --fs-mono: 12.5px;
 
   /* space (4 px grid), shape, size */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
@@ -62,14 +66,24 @@ Use a token for every colour, size, radius, shadow and duration. A raw hex value
   --r: 6px;      /* buttons, fields, rows, toggles */
   --r-lg: 8px;   /* menus, suggestions, messages, panels */
   --r-xl: 10px;  /* dialogs */
-  --control-h: 32px;
+  --control-h: 32px;      /* buttons, toggles, fields, menu items, row actions */
+  --control-h-sm: 24px;   /* controls inside a field or a line of text: scope, tokens, inline buttons */
   --rail: 50px;
+
+  /* fixed grounds: the same in both themes */
+  --paper: #fff;          /* the ground an email is drawn on */
+  --on-strong: #fff;      /* text on a strong colour: account pills, avatars, the danger link warning */
+  --star: #e2a400;        /* stars only */
+  --scrim: rgba(0,0,0,.45);                       /* behind a dialog */
+  --stage: rgba(0,0,0,.93); --stage-muted: #bbb;  /* behind an attachment shown in place */
+  --spectrum: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);  /* the hue strip */
 
   /* depth and motion */
   --shadow-float: 0 8px 24px rgba(0,0,0,.12);
   --shadow-modal: 0 24px 64px rgba(0,0,0,.2);
   --focus: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
-  --t-menu: 80ms; --t-rail: 120ms;
+  --t-rail: 120ms;
+  --t-spin: 1s; --t-pulse: 1.6s;   /* indicators that show work is running; not transitions */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -117,13 +131,20 @@ Numbers that line up use `font-variant-numeric: tabular-nums`. Japanese renders 
 
 ## Components
 
-**Buttons.** 32 px high, `--r`, panel background, hairline border; hover is `--hover`.
-`.quiet` has no border until hovered. `.primary` (accent fill, `--on-accent` text) at most once
-per dialog, and only where the default action is not already a key. Destructive actions are a
-plain button with `--danger` text. Icon-only buttons are 32 × 32 and carry an `aria-label`.
+**Buttons.** Two heights only. `--control-h` (32 px) for buttons, toggles, fields, menu items
+and actions in a list row; `--control-h-sm` (24 px) for controls inside a field or a line of
+text (the scope chip, tokens, "Show pictures", the Doctor's inline buttons). `--r`, panel
+background, hairline border; hover is `--hover`. `.quiet` has no border until hovered.
+`.primary` (accent fill, `--on-accent` text) at most once per dialog, and only where the default
+action is not already a key. Destructive actions are a plain button with `--danger` text.
+Icon-only buttons are square at their height and carry an `aria-label`. Colour swatches are
+32 px circles.
 
-**Keys on controls.** The `data-key` badge sits after the label: mono 11 px, `--r-sm`, hairline
-border, `--muted`. On an *on* control it takes the control's colour and `--accent-line` border.
+**Keys on controls.** The `data-key` badge sits after the label: `--mono` at `--fs-key`,
+`--r-sm`, hairline border, `--muted`. On an *on* control it takes the control's colour and
+`--accent-line` border. A key for a group goes on the group (`Shift+F` on the People /
+Automated pair). Icon-only buttons have no room for a badge: their key goes in the tooltip
+(`Ctrl+K` on the assistant). Account number keys show on each account when the rail opens.
 
 **Filter toggles.** Off: a plain button. On: `--tint` background, `--accent` border and text,
 semibold. People / Automated are a joined pair (`.seg`): at most one on, pressing the other
@@ -137,18 +158,28 @@ the matching token or scope. Focus: accent border plus a 1 px accent ring. Sugge
 
 **Conversation rows.** Fixed height, so 140,000 rows scroll without layout work. Unread is
 `--unread-bg` and weight 650, never colour. The cursor is a 4 px `--cursor` bar the full
-height of the row; selection is `--tint`; the open conversation is a neutral shade. The outline
-of rows is drawn before their data arrives.
+height of the row; selection is `--tint` plus a tick over the avatar, so it still shows when
+the picked colour is grey; the open conversation is a neutral shade. The outline of rows is
+drawn before their data arrives.
+
+**Avatars.** Initials on a colour from a fixed set of avatar tokens (`--av-1`…), chosen by a
+hash of the sender, text in `--on-strong`. Defined in `:root`, read by `ui/app.js`; never a
+hex in script.
 
 **Menus, suggestions, toasts.** The only floating things besides dialogs: `--r-lg`, hairline,
-`--shadow-float`. Menu items are 32 px; a check shows the current choice. A toast confirms and
-offers undo (`z`); it never asks a question, and it goes after 4 s or on the next key.
+`--shadow-float`. They appear and go instantly; no fade. Menu items are 32 px; a check shows the
+current choice. A toast confirms and offers undo (`z`); it never asks a question, and it goes
+after 4 s or on the next key.
 
 **Status.** A 9 px dot: `--ok` working, `--warn` needs a look, `--danger` failing, a hollow
 `--muted` ring for idle, a pulsing `--accent` dot for busy. The dot sits on the first line of
 its text. A failure shows its full detail inline in `--mono`, `--danger` text; it is not
 collapsed, summarised or put in a banner. Group rows by subsystem (in the Doctor: Mail, Assistant,
 Other assistants, Search index, Disk), each with an icon, a name and a protocol tag.
+
+The one fill a status colour may take is the **caution about a message's safety** (a phishing
+or spoofing warning, the link that does not go where it says): it is meant to interrupt, so it
+keeps its `--danger` tint and border. Nothing else gets one.
 
 **Dialogs.** `--r-xl`, `--panel`, `--shadow-modal`, over a dimmed window. Title at 20 px; a
 muted line saying what this is; the content; a footer with a summary on the left and actions on
@@ -160,10 +191,12 @@ Motion is a budget, not decoration.
 
 | Duration | For |
 |---|---|
-| 0 ms | Any state change: on/off, selection, cursor, unread, opening a conversation (it is already rendered) |
-| 80 ms | Menus and suggestions appearing |
+| 0 ms | Any state change: on/off, selection, cursor, unread, opening a conversation (it is already rendered), menus and suggestions appearing |
 | 120 ms | The rail opening, after a 120 ms delay that confirms the pointer means it |
-| 300 ms+ | Only then does a spinner appear, if work is still running |
+| 300 ms+ | Only then does a spinner or busy dot appear, if work is still running |
+
+Indicators of running work (`--t-spin`, `--t-pulse`) are not transitions and are allowed, but
+only once the 300 ms has passed.
 
 Never animate list content, row height or layout. Prefer `content-visibility`, fixed row
 heights and pre-rendered views over transitions.
@@ -180,7 +213,7 @@ heights and pre-rendered views over transitions.
 
 ## Checklist for an interface change
 
-- Only tokens outside `:root`; no new raw colours, sizes or durations.
+- Only tokens outside `:root`, in CSS and script; no new raw colours, font sizes or durations.
 - Looks right in light and dark, and with at least the default purple, the amber and the grey
   swatches.
 - Every control shows its key, and the `?` dialog agrees (see CLAUDE.md).
