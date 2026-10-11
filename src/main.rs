@@ -1021,6 +1021,13 @@ mod window {
                     save_at = Some(at);
                     *control_flow = ControlFlow::WaitUntil(at);
                 }
+                // The window coming to the front does not by itself put the keyboard in the page:
+                // until something in it was clicked, no key reached it.
+                Event::WindowEvent { window_id, event: WindowEvent::Focused(true), .. } => {
+                    if let Some((view, _)) = windows.get(&window_id) {
+                        let _ = view.focus();
+                    }
+                }
                 Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. } => {
                     if window_id == main_id {
                         if let Some((_, w)) = windows.get(&main_id) {
