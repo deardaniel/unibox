@@ -213,13 +213,13 @@ function taskbarBadge(n) {
   const s = Math.max(16, Math.min(64, Math.round(16 * devicePixelRatio)));
   const c = Object.assign(document.createElement("canvas"), { width: s, height: s }), g = c.getContext("2d");
   g.fillStyle = token("--badge");
-  // a little smaller than the slot Windows gives it, like other apps' badges
-  g.beginPath(); g.arc(s / 2, s / 2, s * 0.4, 0, 2 * Math.PI); g.fill();
+  // the whole of the slot Windows gives it, like other apps' badges
+  g.beginPath(); g.arc(s / 2, s / 2, s / 2, 0, 2 * Math.PI); g.fill();
   g.fillStyle = token("--on-strong");
-  if (n > 99) { g.beginPath(); g.arc(s / 2, s / 2, s * 0.15, 0, 2 * Math.PI); g.fill(); }
+  if (n > 99) { g.beginPath(); g.arc(s / 2, s / 2, s * 0.19, 0, 2 * Math.PI); g.fill(); }
   else {
     const text = String(n);
-    g.font = `700 ${s * (text.length > 1 ? 0.5 : 0.62)}px "Segoe UI", sans-serif`;
+    g.font = `700 ${s * (text.length > 1 ? 0.62 : 0.78)}px "Segoe UI", sans-serif`;
     g.textAlign = "center";
     const m = g.measureText(text);
     g.fillText(text, s / 2, s / 2 + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2);
