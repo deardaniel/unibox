@@ -790,24 +790,36 @@ impl App {
         };
         let mut c = self.db.conn()?;
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // A message put back in the inbox by an undo has no inbox UID until the next sync. To
+        // archive it again, the undo is withdrawn if it has not been sent, or else the message
+        // is looked up in the inbox when the archive is sent (uid 0).
+        let unplaced = if op == "archive" { "1" } else { "0" };
         let targets: Vec<(String, u32, bool)> = {
             let mut st = tx.prepare(&format!(
-                "SELECT gm_msgid, CASE WHEN in_inbox=1 AND uid IS NOT NULL THEN uid ELSE all_uid END,
-                        in_inbox=1 AND uid IS NOT NULL
+                "SELECT gm_msgid, CASE WHEN in_inbox=1 AND uid IS NOT NULL THEN uid WHEN in_inbox=1 THEN 0 ELSE all_uid END,
+                        in_inbox=1
                    FROM messages
                   WHERE account_id=? AND gm_thrid=?
-                    AND ((in_inbox=1 AND uid IS NOT NULL) OR (in_inbox=0 AND all_uid IS NOT NULL AND {elsewhere}))
+                    AND ((in_inbox=1 AND uid IS NOT NULL) OR (in_inbox=1 AND uid IS NULL AND {unplaced})
+                         OR (in_inbox=0 AND all_uid IS NOT NULL AND {elsewhere}))
                   {only_latest}"
             ))?;
             let rows = st.query_map(params![account_id, thrid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
         for (msgid, uid, inbox) in &targets {
+            let withdrawn = *uid == 0
+                && tx.execute(
+                    "DELETE FROM pending WHERE account_id=? AND gm_msgid=? AND op='unarchive'",
+                    params![account_id, msgid],
+                )? > 0;
             let queued = if *inbox { op.to_string() } else { format!("all:{op}") };
-            tx.execute(
-                "INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?,?,?,?)",
-                params![account_id, msgid, queued, uid],
-            )?;
+            if !withdrawn {
+                tx.execute(
+                    "INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?,?,?,?)",
+                    params![account_id, msgid, queued, uid],
+                )?;
+            }
             tx.execute(
                 &format!("UPDATE messages SET {local} WHERE account_id=? AND gm_msgid=?"),
                 params![account_id, msgid],
@@ -912,7 +924,16 @@ impl App {
                             if all_mail.is_none() {
                                 all_mail = Some(imap.all_mail()?);
                             }
-                            imap.run(&format!("UID MOVE {set} {}", all_mail.as_deref().unwrap_or_default()))?;
+                            // uid 0: back in the inbox after an undo, under a UID not yet known
+                            let mut uids: Vec<u32> = uids.iter().copied().filter(|&u| u != 0).collect();
+                            for r in batch.iter().filter(|r| r.4 == 0) {
+                                if r.2.chars().all(|c| c.is_ascii_digit()) {
+                                    uids.extend(imap.uid_search(&format!("X-GM-MSGID {}", r.2))?);
+                                }
+                            }
+                            if !uids.is_empty() {
+                                imap.run(&format!("UID MOVE {} {}", uid_set(&uids), all_mail.as_deref().unwrap_or_default()))?;
+                            }
                         }
                         // The reverse: find each message in All Mail and copy it to the inbox,
                         // which on Gmail just puts the Inbox label back.
