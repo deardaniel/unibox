@@ -1795,26 +1795,49 @@ function replyInGmail() {
 // A change shows at once, but a list refresh already on its way back from the server can still
 // carry the old state and would undo it on screen. Each change is remembered here until the
 // server has certainly caught up, and every list that arrives is corrected against it.
-const overrides = new Map();   // thread key -> { archive, unread, starred, until }
+const overrides = new Map();   // thread key -> { archive, unread, starred, until, change }
+let changes = 0;
+/** Returns which change this is, for settled(): only the latest change to a conversation settles it. */
 function remember(k, change) {
-  overrides.set(k, { ...overrides.get(k), ...change, until: Infinity });
+  overrides.set(k, { ...overrides.get(k), ...change, until: Infinity, change: ++changes });
+  return changes;
 }
-function settled(k) {
+function settled(k, change) {
   const o = overrides.get(k);
-  if (o) o.until = Date.now() + 3000;
+  if (o && o.change === change) o.until = Date.now() + 3000;
 }
-function applyOverrides(rows) {
+
+// What is asked of the server about one conversation reaches it in the order it was asked:
+// an undo pressed straight after an archive must not overtake it, nor a second archive the undo.
+const inTurn = new Map();   // thread key -> the last request about it
+function whenDone(k, send) {
+  const p = (inTurn.get(k) || Promise.resolve()).catch(() => {}).then(send);
+  inTurn.set(k, p);
+  p.catch(() => {}).finally(() => { if (inTurn.get(k) === p) inTurn.delete(k); });
+  return p;
+}
+/** `shown` is the list on screen, when `rows` is a fresh copy of that same list: a conversation
+ *  an undo has put back in it stays, though the server has not heard of the undo yet. */
+function applyOverrides(rows, shown = []) {
   const now = Date.now();
   for (const [k, o] of overrides) if (o.until < now) overrides.delete(k);
   if (!overrides.size) return rows;
   // an archived conversation leaves the inbox list; in All Mail it stays, no longer marked Inbox
-  return rows.filter(t => state.all || !overrides.get(key(t))?.archive).map(t => {
+  rows = rows.filter(t => state.all || !overrides.get(key(t))?.archive).map(t => {
     const o = overrides.get(key(t));
     if (o?.archive != null) t.in_inbox = !o.archive;
     if (o?.unread != null) t.unread = o.unread;
     if (o?.starred != null) t.starred = o.starred;
     return t;
   });
+  if (!state.all) for (const [k, o] of overrides) {
+    if (o.archive !== false || rows.some(t => key(t) === k)) continue;
+    const t = shown.find(x => key(x) === k);
+    if (!t) continue;
+    const at = rows.findIndex(x => x.date < t.date);
+    rows.splice(at < 0 ? rows.length : at, 0, t);
+  }
+  return rows;
 }
 
 // Which conversations an action applies to: the selection, else the open one, else the cursor row.
@@ -1843,15 +1866,15 @@ function act(op, list = targets(), { record = true } = {}) {
     const k = key(t);
     const index = state.threads.findIndex(x => key(x) === k);
     const row = state.threads[index];
-    remember(k, { archive: op === "archive" ? true : op === "inbox" ? false : undefined,
+    const change = remember(k, { archive: op === "archive" ? true : op === "inbox" ? false : undefined,
       unread: op === "read" ? 0 : op === "unread" ? 1 : undefined,
       starred: op === "star" ? true : op === "unstar" ? false : undefined });
     if (op === "archive" && state.all) {
       if (row) row.in_inbox = false;
     } else if (op === "archive") {
       state.threads = state.threads.filter(x => key(x) !== k);
-      const v = state.views.get(k);
-      if (v) dropView(v);
+      // the view is kept (out of sight) for an undo to show again at once
+      if (state.open?.key === k) hideView();
     } else if (row) {
       if (op === "inbox") row.in_inbox = true;
       if (op === "read") row.unread = 0;
@@ -1860,9 +1883,9 @@ function act(op, list = targets(), { record = true } = {}) {
       if (op === "unstar") row.starred = false;
     }
     // the server answers with the messages it changed, which is what an undo needs
-    const sent = api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } })
+    const sent = whenDone(k, () => api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } }))
       .catch(e => { overrides.delete(k); refreshSoon(); toast(tx("That didn't go through: {why}", { why: txServer(e.message) })); return null; })
-      .finally(() => settled(k));
+      .finally(() => settled(k, change));
     if (!undoing) lastAction.items.push({ t: row || t, index, sent });
   }
   // Marking and starring leave the selection alone, so the same conversations can be marked
@@ -1887,9 +1910,11 @@ async function undo() {
     act(INVERSE[last.op], last.items.map(i => i.t), { record: false });
     return toast(tx("Undone."));
   }
-  // Put the rows back where they were straight away, then tell the server.
+  // Put the rows back where they were straight away, then tell the server. Until it has
+  // heard, a list arriving from it still has them archived and is corrected like any other.
+  const changed = new Map();
   for (const { t, index } of [...last.items].sort((a, b) => a.index - b.index)) {
-    overrides.delete(key(t));
+    changed.set(key(t), remember(key(t), { archive: false }));
     if (!state.threads.some(x => key(x) === key(t))) state.threads.splice(Math.min(Math.max(index, 0), state.threads.length), 0, t);
     t.in_inbox = true;
   }
@@ -1898,12 +1923,16 @@ async function undo() {
   const first = last.items[0];
   if (first) { setCursor(state.threads.findIndex(x => key(x) === key(first.t))); show(first.t); }
   toast(txn(last.items.length, "Back in the inbox.", "{n} conversations back in the inbox."));
-  for (const { t, sent } of last.items) {
-    const done = await sent;   // the archive request itself has to have landed first
-    if (!done?.msgids?.length) continue;
-    api("/api/unarchive", { body: { account_id: t.account_id, msgids: done.msgids } })
-      .catch(e => { toast(tx("Couldn't undo: {why}", { why: txServer(e.message) })); refreshSoon(); });
-  }
+  await Promise.allSettled(last.items.map(({ t, sent }) => {
+    const k = key(t);
+    // the archive request itself has to have landed first, which whenDone sees to
+    return whenDone(k, async () => {
+      const done = await sent;
+      if (done?.msgids?.length) await api("/api/unarchive", { body: { account_id: t.account_id, msgids: done.msgids } });
+    })
+      .catch(e => { overrides.delete(k); toast(tx("Couldn't undo: {why}", { why: txServer(e.message) })); refreshSoon(); })
+      .finally(() => settled(k, changed.get(k)));
+  }));
   if ($("#subs-dialog").open) setTimeout(openSubscriptions, 600);   // its counts are from before
 }
 
@@ -2554,7 +2583,7 @@ async function refresh() {
   let rows = await fetchThreads(asked);
   if (asked !== listParams().toString()) return;
   const at = state.open?.key || (state.threads[state.cursor] && key(state.threads[state.cursor]));
-  rows = applyOverrides(rows);
+  rows = applyOverrides(rows, state.threads);
   state.threads = rows;
   const again = rows.findIndex(t => key(t) === at);
   if (again >= 0) state.cursor = again;
