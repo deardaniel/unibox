@@ -469,9 +469,11 @@ impl App {
                 self.index_range(imap, account_id, from, to)?;
                 from = to + 1;
             }
+            let new = at.high + 1;
             at.high = top;
             self.db.set_all_mail(account_id, &at)?;
             self.emit("changed", email);
+            self.fill_new_replies(imap, account_id, new, top)?;
         }
         if at.low <= at.high {
             let whole = now - at.swept >= SWEEP_EVERY;
@@ -506,6 +508,38 @@ impl App {
             self.doing.lock().unwrap().remove(&account_id);
         }
         Ok(at.low > 1)
+    }
+
+    /// With All Mail selected, fetch the bodies of messages just listed there (UIDs `from..=to`)
+    /// that belong to a conversation in the inbox: a reply sent from another mail program
+    /// joins a conversation that has already been topped up, and would otherwise wait to be
+    /// opened afresh before it showed more than its headers.
+    fn fill_new_replies(&self, imap: &mut Imap, account_id: i64, from: u32, to: u32) -> Result<()> {
+        let want: Vec<(u32, String)> = {
+            let c = self.db.conn()?;
+            let mut st = c.prepare(
+                "SELECT m.all_uid, m.gm_thrid FROM messages m
+                  WHERE m.account_id=?1 AND m.all_uid BETWEEN ?2 AND ?3 AND m.has_body=0 AND m.size<=?4
+                    AND EXISTS (SELECT 1 FROM messages i WHERE i.account_id=?1 AND i.gm_thrid=m.gm_thrid AND i.in_inbox=1)",
+            )?;
+            let rows = st.query_map(params![account_id, from, to, MAX_PREFETCH_SIZE], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let uids: Vec<u32> = want.iter().map(|w| w.0).collect();
+        for chunk in uids.chunks(8) {
+            let fetched = imap.uid_fetch(&uid_set(chunk), FULL_ITEMS)?;
+            let c = self.db.conn()?;
+            for f in &fetched {
+                store_fetched_body(&c, account_id, f)?;
+            }
+        }
+        let mut thrids: Vec<String> = want.into_iter().map(|w| w.1).collect();
+        thrids.sort_unstable();
+        thrids.dedup();
+        for thrid in thrids {
+            self.emit("thread", &thrid);
+        }
+        Ok(())
     }
 
     /// List the All Mail messages with UIDs `from..=to`. Drafts are left out. Returns when the

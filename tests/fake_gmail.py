@@ -370,6 +370,18 @@ class Handler(socketserver.StreamRequestHandler):
                     msgs.append(Msg(n, 9000 + n, raw, int(time.time())))
                     touch(user)
                     self.send(f"{tag} OK delivered\r\n")
+                elif cmd == "XREPLY":
+                    # test hook: the owner replies from another mail program to the newest
+                    # conversation in the inbox, so the reply is in All Mail only.  XREPLY
+                    msgs = box(user)
+                    latest = max((m for m in msgs if m.inbox), key=lambda m: m.when)
+                    n = max(m.uid_all for m in msgs) + 1
+                    subject = latest.raw.split(b"Subject: ", 1)[-1].split(b"\n", 1)[0].decode().strip()
+                    raw = build(frm=f"Me <{user}>", to="someone@example.com", subject=re.sub(r"^(Re: )?", "Re: ", subject),
+                                when=int(time.time()), text="Sent from my phone while the app was open.", auth=None)
+                    msgs.append(Msg(n, int(latest.thrid) - 1800000000000000000, raw, int(time.time()), inbox=False, seen=True))
+                    touch(user)
+                    self.send(f"{tag} OK replied\r\n")
                 elif cmd == "XDRAFTS":
                     # test hook: hand back the newest saved draft
                     saved = DRAFTS.get(user, [])
