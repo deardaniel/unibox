@@ -73,6 +73,8 @@ const MESSAGES = {
     "Commands, sizes and timings since Unibox started. The mail itself is never recorded here, and nothing is kept after you close the app.": "Unibox の起動後に送ったコマンド、サイズ、所要時間です。メールの内容はここには記録されず、アプリを閉じると何も残りません。",
     "Copy activity": "記録をコピー",
     "Check again": "再確認",
+    "Test notification": "通知をテスト",
+    "Show a Windows notification, to check they get through": "Windows の通知を表示して、届くか確認します",
     "just now": "たった今",
     "Working": "正常",
     "Working, with something to look at": "動作中 (確認事項あり)",

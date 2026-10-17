@@ -1341,6 +1341,7 @@ $("#doctor").onclick = () => { $("#doctor").blur(); openDoctor(); };
 $("#doctor-close").onclick = () => $("#doctor-dialog").close();
 $("#doctor-dialog").addEventListener("close", () => clearTimeout(doctor.timer));
 $("#doctor-again").onclick = () => api("/api/doctor", { method: "POST" }).catch(e => toast(txServer(e.message)));
+$("#doctor-notify").onclick = () => api("/api/doctor/notify", { method: "POST" }).catch(e => toast(txServer(e.message)));
 $("#doctor-show").onclick = e => {
   const b = e.target.closest("button");
   if (!b) return;

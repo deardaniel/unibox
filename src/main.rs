@@ -7,6 +7,7 @@ mod doctor;
 mod imap;
 mod mcp;
 mod mime;
+mod notify;
 mod secrets;
 mod sync;
 mod facts;
@@ -570,6 +571,15 @@ async fn focus_window() -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
+/// Show a Windows notification, to see that they get through (Doctor → Test notification).
+async fn test_notification() -> Api<StatusCode> {
+    let began = std::time::Instant::now();
+    let shown = blocking(|| notify::show("Unibox", "Notifications from Unibox arrive like this. Click to bring the window forward.")).await;
+    let outcome = shown.as_ref().map(|_| "shown".to_string()).unwrap_or_else(|e| e.1.clone());
+    doctor::note("app", "Windows", "Test notification", &outcome, shown.is_ok(), Some(began.elapsed()));
+    shown.map(|_| StatusCode::NO_CONTENT)
+}
+
 /// Save an attachment into the Downloads folder and show it there. The app window has
 /// no download bar of its own, and this never opens the file, so nothing runs by surprise.
 async fn save_attachment(State(app): State<Arc<App>>, Path((id, index)): Path<(i64, usize)>) -> Api<Json<serde_json::Value>> {
@@ -701,6 +711,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/agent/collection/clear", post(agent_clear_collection))
         .route("/api/doctor", get(doctor_view).post(doctor_check))
         .route("/api/doctor/trim", post(doctor_trim))
+        .route("/api/doctor/notify", post(test_notification))
         .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/message/:id/attachment/:index/preview", get(attachment_preview))

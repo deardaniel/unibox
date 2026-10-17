@@ -29,6 +29,8 @@ wry = "0.57"
 # only to ask WebView2 to empty its cache; the same versions wry itself uses
 webview2-com = "0.39"
 windows-core = "0.62"
+# toasts (WinRT notifications) and the registry entry that names the app in them
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_System_Registry"] }
 
 [profile.release]
 opt-level = 2

@@ -2858,6 +2858,7 @@ dependencies = [
  "ureq",
  "webpki-roots 0.26.11",
  "webview2-com",
+ "windows",
  "windows-core",
  "wry",
 ]
