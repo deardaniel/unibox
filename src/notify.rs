@@ -13,10 +13,12 @@ fn xml_text(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
+/// `open` comes back as the toast's arguments when it is clicked.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn toast_xml(title: &str, body: &str) -> String {
+fn toast_xml(title: &str, body: &str, open: &str) -> String {
     format!(
-        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+        "<toast launch=\"{}\"><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+        xml_text(open),
         xml_text(title),
         xml_text(body)
     )
@@ -42,31 +44,82 @@ fn register() -> windows::core::Result<()> {
     Ok(())
 }
 
-/// Show a toast; clicking it brings the main window to the front.
+/// Above this many new messages at once, one toast says how many instead of one each.
+const MAX_EACH: usize = 3;
+
+/// A message that just arrived in the inbox, for its toast.
+pub struct Arrival {
+    pub account_id: i64,
+    pub thrid: String,
+    pub from: String,
+    pub subject: String,
+}
+
+/// One toast to show: title, text, and the conversation ("account:thread") clicking it opens,
+/// empty for none.
+#[derive(Debug, PartialEq)]
+pub struct Toast {
+    pub title: String,
+    pub body: String,
+    pub open: String,
+}
+
+/// The toasts for mail that just arrived in `account`'s inbox, in the page's language `lang`:
+/// one per message (sender, subject), or one counting them when there are more than `MAX_EACH`.
+pub fn toasts(new: &[Arrival], account: &str, lang: &str) -> Vec<Toast> {
+    let ja = lang.starts_with("ja");
+    if new.len() > MAX_EACH {
+        let title = if ja { format!("{} 件の新着メッセージ", new.len()) } else { format!("{} new messages", new.len()) };
+        return vec![Toast { title, body: account.to_string(), open: String::new() }];
+    }
+    new.iter()
+        .map(|a| Toast {
+            title: a.from.clone(),
+            body: if ja && a.subject == "(no subject)" { "(件名なし)".into() } else { a.subject.clone() },
+            open: format!("{}:{}", a.account_id, a.thrid),
+        })
+        .collect()
+}
+
+/// Whether one of Unibox's windows is the one in front, so new mail is in view already.
+pub fn app_in_front() -> bool {
+    #[cfg(windows)]
+    return crate::window::in_front();
+    #[cfg(not(windows))]
+    false
+}
+
+/// Show a toast. Clicking it brings the main window to the front and calls `clicked` with the
+/// toast's `open`.
 #[cfg(windows)]
-pub fn show(title: &str, body: &str) -> anyhow::Result<()> {
+pub fn show(toast: &Toast, clicked: impl Fn(&str) + Send + 'static) -> anyhow::Result<()> {
     use std::sync::Mutex;
-    use windows::core::{IInspectable, HSTRING};
+    use windows::core::{Interface, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
-    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
-    // The last toast is held on to, so its click still reaches us while it is on screen.
-    static LAST: Mutex<Option<ToastNotification>> = Mutex::new(None);
+    use windows::UI::Notifications::{ToastActivatedEventArgs, ToastNotification, ToastNotificationManager};
+    // The last few toasts are held on to, so a click still reaches us while they are on screen.
+    static RECENT: Mutex<Vec<ToastNotification>> = Mutex::new(Vec::new());
     register()?;
     let doc = XmlDocument::new()?;
-    doc.LoadXml(&HSTRING::from(toast_xml(title, body)))?;
-    let toast = ToastNotification::CreateToastNotification(&doc)?;
-    toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(|_, _| {
+    doc.LoadXml(&HSTRING::from(toast_xml(&toast.title, &toast.body, &toast.open)))?;
+    let shown = ToastNotification::CreateToastNotification(&doc)?;
+    shown.Activated(&TypedEventHandler::new(move |_, args: windows::core::Ref<windows::core::IInspectable>| {
         crate::window::focus();
+        let open = args.ok()?.cast::<ToastActivatedEventArgs>()?.Arguments()?;
+        clicked(&open.to_string());
         Ok(())
     }))?;
-    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)?;
-    *LAST.lock().unwrap() = Some(toast);
+    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&shown)?;
+    let mut recent = RECENT.lock().unwrap();
+    recent.push(shown);
+    let extra = recent.len().saturating_sub(10);
+    recent.drain(..extra);
     Ok(())
 }
 
 #[cfg(not(windows))]
-pub fn show(_title: &str, _body: &str) -> anyhow::Result<()> {
+pub fn show(_toast: &Toast, _clicked: impl Fn(&str) + Send + 'static) -> anyhow::Result<()> {
     anyhow::bail!("notifications need Windows")
 }
 
@@ -77,9 +130,28 @@ mod tests {
     #[test]
     fn toast_text_is_escaped() {
         assert_eq!(
-            toast_xml("A & B", "<b>\"hi\"</b>"),
-            "<toast><visual><binding template=\"ToastGeneric\"><text>A &amp; B</text>\
+            toast_xml("A & B", "<b>\"hi\"</b>", "1:2"),
+            "<toast launch=\"1:2\"><visual><binding template=\"ToastGeneric\"><text>A &amp; B</text>\
              <text>&lt;b&gt;&quot;hi&quot;&lt;/b&gt;</text></binding></visual></toast>"
         );
+    }
+
+    fn arrival(n: usize) -> Arrival {
+        Arrival { account_id: 2, thrid: format!("{n}"), from: format!("Sender {n}"), subject: "(no subject)".into() }
+    }
+
+    #[test]
+    fn a_few_messages_get_a_toast_each_and_more_get_one_counting_them() {
+        let three: Vec<_> = (1..=3).map(arrival).collect();
+        let each = toasts(&three, "me@example.com", "en-US");
+        assert_eq!(each.len(), 3);
+        assert_eq!(each[0], Toast { title: "Sender 1".into(), body: "(no subject)".into(), open: "2:1".into() });
+        assert_eq!(toasts(&three, "me@example.com", "ja-JP")[0].body, "(件名なし)");
+        let four: Vec<_> = (1..=4).map(arrival).collect();
+        assert_eq!(
+            toasts(&four, "me@example.com", "en-GB"),
+            vec![Toast { title: "4 new messages".into(), body: "me@example.com".into(), open: String::new() }]
+        );
+        assert!(toasts(&[], "me@example.com", "en-US").is_empty());
     }
 }

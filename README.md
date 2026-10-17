@@ -58,6 +58,10 @@ triage: replying opens the conversation in Gmail.
   and the window's cache, with buttons to clear the cache and to remove the downloaded copies of
   conversations that have left the inbox (they stay in Gmail and are fetched again when opened).
   Test notification shows a Windows toast, to check that notifications from Unibox get through.
+- New-mail notifications: a Windows toast for each new unread message (one counting them when
+  more than three arrive at once) while no Unibox window is in front; clicking it opens the
+  conversation. Mail that arrived while the app was closed, your own sent mail and anything
+  older than a day stay quiet. Turned off in Appearance.
 
 **Privacy**
 
@@ -197,7 +201,7 @@ Open `http://127.0.0.1:47921/` and add any address with any password (`wrong` is
 | `src/secrets.rs` | Passwords and keys in the Windows Credential Manager |
 | `src/agent.rs` | The assistant: model loop, tools, draft building |
 | `src/doctor.rs` | The doctor: the activity record, the checks and disk use |
-| `src/notify.rs` | Windows notifications (toasts) and the AppUserModelID that names Unibox in them |
+| `src/notify.rs` | Windows notifications (toasts): what new mail shows, and the AppUserModelID that names Unibox in them |
 | `src/mcp.rs` | The same tools for other assistants, over MCP |
 | `ui/` | The interface (plain HTML/CSS/JS, embedded in the binary); `i18n.js` holds the translations |
 | `tests/` | The pretend Gmail and Claude servers |

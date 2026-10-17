@@ -394,6 +394,8 @@ const MESSAGES = {
     "Show keys on buttons": "ボタンにキーを表示",
     "The keys still work, and stay in tooltips and the list under": "キー操作はそのまま使え、ツールチップと次の一覧には表示されます:",
     "Show tips": "ヒントを表示",
+    "Notify me of new mail": "新着メールを通知",
+    "A Windows notification for new unread mail while Unibox is not in front. Click it to open the conversation.": "Unibox が前面にないとき、未読の新着メールを Windows の通知でお知らせします。クリックするとその会話を開きます。",
     "Hints that teach a key or a feature, like the keys under search suggestions and the examples in a new assistant chat.": "キーや機能を説明するヒント (検索候補の下のキー案内や、新しいアシスタントチャットの例文など)。",
     "More actions": "その他の操作",
     "Archived {n} message.": "メッセージ {n} 件をアーカイブしました。",

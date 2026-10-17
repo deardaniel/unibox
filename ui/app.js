@@ -988,6 +988,10 @@ function applySwitches() {
 for (const [box, name] of SWITCHES) $(box).onchange = e => { store.set(name, e.target.checked ? "on" : "off"); applySwitches(); };
 addEventListener("storage", e => { if (e.key === "keys" || e.key === "tips") applySwitches(); });
 applySwitches();
+// New-mail notifications are shown by the server, so that switch is kept there, along with the
+// language their text should be in.
+api("/api/notify", { body: { lang: LOCALE } }).then(n => { $("#notify-new").checked = n.on; }).catch(() => {});
+$("#notify-new").onchange = e => api("/api/notify", { body: { on: e.target.checked } }).catch(err => toast(txServer(err.message)));
 {
   // the language: the system's unless one is picked here; the page is redrawn in it
   const choose = $("#language");
@@ -2609,6 +2613,13 @@ function listen() {
     if (ev.kind === "agent") return SOLO ? null : loadAssistant();
     if (ev.kind === "agent-show") return SOLO ? null : showCollection(ev.detail);
     if (ev.kind === "agent-acted") { if (!SOLO) assistantActed(JSON.parse(ev.detail)); return; }
+    if (ev.kind === "open") {
+      // a notification was clicked: show its conversation in the main window
+      if (SOLO) return;
+      const [account_id, thrid] = ev.detail.split(":");
+      show(state.threads.find(t => t.account_id === +account_id && t.thrid === thrid) || { account_id: +account_id, thrid, subject: "" });
+      return;
+    }
     if (SOLO) { if (state.open) loadView(state.open, true).catch(() => {}); return; }
     if (ev.kind === "indexed") {
       // older mail being listed in the background: only All Mail shows it, and not every chunk

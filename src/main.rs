@@ -574,10 +574,37 @@ async fn focus_window() -> StatusCode {
 /// Show a Windows notification, to see that they get through (Doctor → Test notification).
 async fn test_notification() -> Api<StatusCode> {
     let began = std::time::Instant::now();
-    let shown = blocking(|| notify::show("Unibox", "Notifications from Unibox arrive like this. Click to bring the window forward.")).await;
+    let toast = notify::Toast {
+        title: "Unibox".into(),
+        body: "Notifications from Unibox arrive like this. Click to bring the window forward.".into(),
+        open: String::new(),
+    };
+    let shown = blocking(move || notify::show(&toast, |_| {})).await;
     let outcome = shown.as_ref().map(|_| "shown".to_string()).unwrap_or_else(|e| e.1.clone());
     doctor::note("app", "Windows", "Test notification", &outcome, shown.is_ok(), Some(began.elapsed()));
     shown.map(|_| StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct NotifySettings {
+    on: Option<bool>,
+    lang: Option<String>,
+}
+
+/// Whether new mail shows a notification, and the page's language for the text in them.
+async fn notify_settings(State(app): State<Arc<App>>, body: Option<Json<NotifySettings>>) -> Api<Json<serde_json::Value>> {
+    blocking(move || {
+        if let Some(Json(b)) = body {
+            if let Some(on) = b.on {
+                app.db.set_meta("notify", if on { "on" } else { "off" })?;
+            }
+            if let Some(lang) = b.lang.filter(|l| l.len() <= 16) {
+                app.db.set_meta("notify-lang", &lang)?;
+            }
+        }
+        Ok(Json(serde_json::json!({ "on": app.notify_on() })))
+    })
+    .await
 }
 
 /// Save an attachment into the Downloads folder and show it there. The app window has
@@ -712,6 +739,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/doctor", get(doctor_view).post(doctor_check))
         .route("/api/doctor/trim", post(doctor_trim))
         .route("/api/doctor/notify", post(test_notification))
+        .route("/api/notify", get(notify_settings).post(notify_settings))
         .route("/api/sync", get(sync_status).post(sync_now))
         .route("/api/message/:id/attachment/:index/save", post(save_attachment))
         .route("/api/message/:id/attachment/:index/preview", get(attachment_preview))
@@ -741,6 +769,7 @@ fn open_external(url: &str) -> std::io::Result<()> {
 mod window {
     use std::collections::HashMap;
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
     use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -773,6 +802,11 @@ mod window {
     }
     pub fn focus() {
         send(UserEvent::Focus);
+    }
+    /// Whether one of the app's windows has the keyboard (kept by the event loop).
+    static IN_FRONT: AtomicBool = AtomicBool::new(false);
+    pub fn in_front() -> bool {
+        IN_FRONT.load(Ordering::Relaxed)
     }
     pub fn open(url: String) {
         send(UserEvent::Open(url));
@@ -1034,7 +1068,9 @@ mod window {
                 }
                 // The window coming to the front does not by itself put the keyboard in the page:
                 // until something in it was clicked, no key reached it.
+                Event::WindowEvent { event: WindowEvent::Focused(false), .. } => IN_FRONT.store(false, Ordering::Relaxed),
                 Event::WindowEvent { window_id, event: WindowEvent::Focused(true), .. } => {
+                    IN_FRONT.store(true, Ordering::Relaxed);
                     if let Some((view, _)) = windows.get(&window_id) {
                         let _ = view.focus();
                     }

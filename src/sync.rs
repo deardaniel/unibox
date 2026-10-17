@@ -68,6 +68,9 @@ pub struct App {
     /// The same, for each account that has such work going on.
     doing: Mutex<HashMap<i64, String>>,
     pub agent: crate::agent::AgentState,
+    /// Accounts whose inbox has been listed since the app started. Mail found on that first
+    /// listing arrived while the app was closed, and gets no notification.
+    listed: Mutex<HashSet<i64>>,
 }
 
 impl App {
@@ -87,6 +90,7 @@ impl App {
             activity: Mutex::new(String::new()),
             doing: Mutex::new(HashMap::new()),
             agent: Default::default(),
+            listed: Mutex::new(HashSet::new()),
         })
     }
 
@@ -357,14 +361,21 @@ impl App {
         self.emit("changed", email);
 
         // Headers for anything new, newest first so the top of the list fills in first.
+        let first_listing = !self.listed.lock().unwrap().contains(&account_id);
+        let mut arrived = Vec::new();
         for chunk in new_uids.chunks(200) {
             let fetched = imap.uid_fetch(&uid_set(chunk), HEADER_ITEMS)?;
             let c = self.db.conn()?;
             for f in &fetched {
                 insert_fetched(&c, account_id, f, true)?;
+                if !first_listing {
+                    arrived.extend(arrival(account_id, email, f));
+                }
             }
             self.emit("changed", email);
         }
+        self.listed.lock().unwrap().insert(account_id);
+        self.announce(email, &arrived);
 
         if !new_uids.is_empty() {
             let with_files = imap.uid_search("X-GM-RAW \"has:attachment\"")?;
@@ -1013,6 +1024,30 @@ impl App {
     }
 
     /// Append a line to unibox.log in the data folder. The Windows build has no console.
+    /// Whether new mail shows a notification (on unless turned off in Appearance).
+    pub fn notify_on(&self) -> bool {
+        self.db.meta("notify").ok().flatten().as_deref() != Some("off")
+    }
+
+    /// Show a notification for mail that just arrived, unless they are off or Unibox is in front.
+    fn announce(&self, email: &str, arrived: &[crate::notify::Arrival]) {
+        if arrived.is_empty() || !self.notify_on() || crate::notify::app_in_front() {
+            return;
+        }
+        let lang = self.db.meta("notify-lang").ok().flatten().unwrap_or_default();
+        for toast in crate::notify::toasts(arrived, email, &lang) {
+            let events = self.events.clone();
+            // clicking opens the conversation in the main window
+            let shown = crate::notify::show(&toast, move |open| {
+                if !open.is_empty() {
+                    let _ = events.send(serde_json::json!({ "kind": "open", "detail": open }).to_string());
+                }
+            });
+            let outcome = shown.as_ref().map(|_| "shown".to_string()).unwrap_or_else(|e| e.to_string());
+            crate::doctor::note("app", "Windows", &format!("New mail notification, {} arrived", arrived.len()), &outcome, shown.is_ok(), None);
+        }
+    }
+
     pub fn log(&self, line: &str) {
         use std::io::Write;
         eprintln!("{line}");
@@ -1052,6 +1087,26 @@ fn month_year(secs: i64) -> String {
     const NAMES: [&str; 12] =
         ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     format!("{} {year}", NAMES[(month - 1) as usize])
+}
+
+/// Mail worth a notification: unread, not a draft, not sent by the account itself, and from
+/// the last day (so an old message moved back into the inbox stays quiet).
+fn arrival(account_id: i64, email: &str, f: &Fetched) -> Option<crate::notify::Arrival> {
+    let date = f.get("INTERNALDATE").and_then(|d| parse_internaldate(&d.text()))?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+    if fetched_flags(f).0 || is_draft(f) || date < now - 86_400 {
+        return None;
+    }
+    let headers = mime::parse_headers(f.get("BODY").map(|b| b.bytes()).unwrap_or_default());
+    if headers.from_addr.eq_ignore_ascii_case(email) {
+        return None;
+    }
+    Some(crate::notify::Arrival {
+        account_id,
+        thrid: f.get("X-GM-THRID")?.text(),
+        from: if headers.from_name.is_empty() { headers.from_addr } else { headers.from_name },
+        subject: headers.subject,
+    })
 }
 
 fn is_draft(f: &Fetched) -> bool {
