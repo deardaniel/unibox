@@ -339,7 +339,8 @@ impl App {
                 tx.commit()?;
             }
             self.db.set_meta("summary_version", mime::SUMMARY_VERSION)?;
-            self.emit("changed", "");
+            // conversations already open were read in the old form: the page shows them again
+            self.emit("summaries", "");
             Ok(())
         };
         if let Err(e) = work() {

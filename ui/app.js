@@ -2627,8 +2627,9 @@ function listen() {
       indexedTimer = setTimeout(() => { indexedTimer = 0; refresh().catch(() => {}); }, 4000);
       return;
     }
-    if (ev.kind === "thread") {
-      for (const v of state.views.values()) if (v.thrid === ev.detail) loadView(v, true).catch(() => {});
+    if (ev.kind === "thread" || ev.kind === "summaries") {
+      // one conversation changed, or every message was read again (its cards, attachments)
+      for (const v of state.views.values()) if (ev.kind === "summaries" || v.thrid === ev.detail) loadView(v, true).catch(() => {});
     }
     refreshSoon();
   };
