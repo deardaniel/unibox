@@ -762,7 +762,8 @@ function hideView() {
 }
 
 function markOpenRow() {
-  for (const [i, node] of rowNodes) node.classList.toggle("open", state.open?.key === key(state.threads[i]));
+  // rows drawn before the list shrank (an archive) can outnumber it until the next renderList
+  for (const [i, node] of rowNodes) node.classList.toggle("open", !!state.threads[i] && state.open?.key === key(state.threads[i]));
 }
 
 function renderMessage(v, m, open) {
