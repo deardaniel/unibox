@@ -201,6 +201,15 @@ def mailbox(owner):
         Booking 13030 - Payment for the afternoon of the party, including delivery and collection</td>
         <td width="8"></td><td align="right" valign="top" style="font-size:16px" id="price">&euro;185.00</td></tr></table>
         </td></tr></table>""")
+    # Two events in one message, each as an .ics file of its own: both get a card.
+    def ics(uid, summary, start, end):
+        return "\r\n".join(["BEGIN:VCALENDAR", "PRODID:-//Fake//EN", "VERSION:2.0", "METHOD:PUBLISH", "BEGIN:VEVENT",
+                             f"UID:{uid}", f"DTSTART;TZID=Asia/Tokyo:{start}", f"DTEND;TZID=Asia/Tokyo:{end}",
+                             f"SUMMARY:{summary}", "END:VEVENT", "END:VCALENDAR", ""]).encode()
+    add(13, 3.5, frm="Dan Byrne <dan@mail.example>", subject="Calendar files", human=True,
+        text="Lunch on Sat 24 Oct, and the countdown concert on Wed 30 Dec. Open the attachments to add them.",
+        extra=[("lunch-2026-10-24.ics", ics("lunch-1@fake", "Lunch at the garden mall", "20261024T130000", "20261024T140000"), ("text", "calendar")),
+               ("countdown-2026-12-30.ics", ics("live-1@fake", "Countdown concert", "20261230T180000", "20261230T220000"), ("text", "calendar"))])
     # A long read, several screens tall, for trying the remembered reading position.
     add(12, 11, frm="Works in Print <essays@longreads.example>", subject="The long essay: how the canal was dug", seen=True,
         html="".join(f"<h2>Part {i + 1}</h2><p>" + f"Paragraph {i + 1} of the essay goes on at some length. " * 30 + "</p>" for i in range(40)))

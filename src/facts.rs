@@ -20,8 +20,9 @@ pub struct Facts {
     pub unsubscribe: Option<Unsubscribe>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<Group>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event: Option<Event>,
+    /// Calendar events, from every invitation or .ics file in the message.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<Event>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cards: Vec<Card>,
     /// The formatted version refers to pictures on someone's server.
@@ -79,6 +80,9 @@ pub struct Event {
     pub organizer: Attendee,
     pub attendees: Vec<Attendee>,
     pub recurs: bool,
+    /// The event's UID, to notice the same event sent twice (an invitation and its .ics).
+    #[serde(skip)]
+    pub uid: String,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -125,14 +129,14 @@ fn mailbox(value: &str) -> (String, String) {
 pub fn facts(msg: &Message, raw: &[u8]) -> Facts {
     let html = msg.html_body.first().and_then(|_| msg.body_html(0)).unwrap_or_default();
     let group = group(msg, raw);
-    let event = event(msg);
+    let events = events(msg);
     let mut cards = cards(&html);
-    if event.is_some() {
+    if !events.is_empty() {
         // the invitation itself says it better
         cards.retain(|c| !c.rows.iter().any(|r| r.label == "When" && c.actions.is_empty()));
     }
     let (automated, why) = automated(msg, group.as_ref());
-    Facts { automated, why, unsubscribe: unsubscribe(msg), group, event, cards, remote_images: remote_images(&html) }
+    Facts { automated, why, unsubscribe: unsubscribe(msg), group, events, cards, remote_images: remote_images(&html) }
 }
 
 // ---- unsubscribe ---------------------------------------------------------------
@@ -295,13 +299,24 @@ fn remote_images(html: &str) -> bool {
 }
 
 // ---- calendar events -----------------------------------------------------------
-fn event(msg: &Message) -> Option<Event> {
-    let part = msg.parts.iter().find(|p| {
+/// The events in every calendar part of the message. An invitation often comes both as the
+/// message's calendar part and as an .ics attachment; the same event is kept once.
+fn events(msg: &Message) -> Vec<Event> {
+    let mut events: Vec<Event> = Vec::new();
+    let calendars = msg.parts.iter().filter(|p| {
         let kind = p.content_type().map(|c| format!("{}/{}", c.ctype(), c.subtype().unwrap_or_default()).to_ascii_lowercase());
         matches!(kind.as_deref(), Some("text/calendar" | "application/ics" | "text/x-vcalendar"))
             || p.attachment_name().is_some_and(|n| n.to_ascii_lowercase().ends_with(".ics"))
-    })?;
-    parse_event(&String::from_utf8_lossy(part.contents()))
+    });
+    for part in calendars {
+        for e in parse_events(&String::from_utf8_lossy(part.contents())) {
+            let same = |o: &Event| if e.uid.is_empty() { o.summary == e.summary && o.start == e.start } else { o.uid == e.uid };
+            if events.len() < 20 && !events.iter().any(same) {
+                events.push(e);
+            }
+        }
+    }
+    events
 }
 
 /// One line of an iCalendar file: (NAME, parameters, value).
@@ -351,11 +366,16 @@ fn ical_text(value: &str) -> String {
     out.trim().to_string()
 }
 
-fn parse_event(text: &str) -> Option<Event> {
+/// Every event in an iCalendar file. Changes to single dates of a repeating event (those
+/// with a RECURRENCE-ID) are left out: the event they belong to is already there.
+fn parse_events(text: &str) -> Vec<Event> {
     // long lines are folded: a line starting with a space continues the one before
     let unfolded = text.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "");
-    let mut e = Event::default();
-    let (mut inside, mut nested, mut seen) = (false, 0, false);
+    let mut events = Vec::new();
+    let mut method = String::new();
+    // the event being read, whether it was cancelled, and whether it changes one date of another
+    let mut current: Option<(Event, bool, bool)> = None;
+    let mut nested = 0;
     let param = |params: &[(String, String)], key: &str| {
         params.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).unwrap_or_default()
     };
@@ -377,25 +397,31 @@ fn parse_event(text: &str) -> Option<Event> {
     };
     for line in unfolded.lines() {
         let Some((name, params, value)) = ical_line(line) else { continue };
-        match (name.as_str(), value.trim().to_ascii_uppercase().as_str()) {
-            ("BEGIN", "VEVENT") if !seen => {
-                inside = true;
+        match (name.as_str(), value.trim().to_ascii_uppercase().as_str(), current.is_some()) {
+            ("BEGIN", "VEVENT", false) => {
+                current = Some(Default::default());
+                nested = 0;
                 continue;
             }
-            ("END", "VEVENT") => {
-                inside = false;
-                seen = true;
+            ("END", "VEVENT", true) if nested == 0 => {
+                if let Some((mut e, cancelled, one_date)) = current.take() {
+                    let dated = e.start.value.len() >= 8 && e.start.value.bytes().take(8).all(|b| b.is_ascii_digit());
+                    if dated && !one_date {
+                        if cancelled {
+                            e.method = "cancel".into();
+                        }
+                        events.push(e);
+                    }
+                }
                 continue;
             }
             // alarms inside the event have a DESCRIPTION and more of their own
-            ("BEGIN", _) if inside => nested += 1,
-            ("END", _) if inside && nested > 0 => nested -= 1,
-            ("METHOD", m) => e.method = m.to_ascii_lowercase(),
+            ("BEGIN", _, true) => nested += 1,
+            ("END", _, true) if nested > 0 => nested -= 1,
+            ("METHOD", m, false) => method = m.to_ascii_lowercase(),
             _ => {}
         }
-        if !inside || nested > 0 {
-            continue;
-        }
+        let Some((e, cancelled, one_date)) = current.as_mut().filter(|_| nested == 0) else { continue };
         match name.as_str() {
             "SUMMARY" => e.summary = ical_text(value),
             "LOCATION" => e.location = ical_text(value),
@@ -404,11 +430,18 @@ fn parse_event(text: &str) -> Option<Event> {
             "ORGANIZER" => e.organizer = person(&params, value),
             "ATTENDEE" if e.attendees.len() < 40 => e.attendees.push(person(&params, value)),
             "RRULE" => e.recurs = true,
-            "STATUS" if value.trim().eq_ignore_ascii_case("CANCELLED") => e.method = "cancel".into(),
+            "UID" => e.uid = value.trim().to_string(),
+            "RECURRENCE-ID" => *one_date = true,
+            "STATUS" if value.trim().eq_ignore_ascii_case("CANCELLED") => *cancelled = true,
             _ => {}
         }
     }
-    (seen && e.start.value.len() >= 8 && e.start.value.bytes().take(8).all(|b| b.is_ascii_digit())).then_some(e)
+    for e in &mut events {
+        if e.method.is_empty() {
+            e.method = method.clone();
+        }
+    }
+    events
 }
 
 // ---- bookings, orders, deliveries ------------------------------------------------
@@ -798,6 +831,31 @@ List-Post: <https://groups.google.com/a/example.ie/group/kids/post>, <mailto:kid
         assert_eq!(g.sender_name, "Aoife Byrne");
     }
 
+    fn first_event(text: &str) -> Option<Event> {
+        parse_events(text).into_iter().next()
+    }
+
+    #[test]
+    fn every_event_is_read_once() {
+        let ics = |uid: &str, summary: &str, day: &str| {
+            format!("BEGIN:VCALENDAR\nMETHOD:PUBLISH\nBEGIN:VEVENT\nUID:{uid}\nDTSTART:{day}T040000Z\nSUMMARY:{summary}\nEND:VEVENT\nEND:VCALENDAR\n")
+        };
+        // two files, one of them also sent as the message's own calendar part
+        let f = of(&format!("From: a@example.com\nSubject: s\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=b1\n\n\
+--b1\nContent-Type: text/plain\n\nTwo events\n--b1\nContent-Type: text/calendar; charset=utf-8\n\n{}\
+--b1\nContent-Type: application/octet-stream; name=lunch.ics\nContent-Disposition: attachment; filename=lunch.ics\n\n{}\
+--b1\nContent-Type: application/octet-stream; name=live.ics\nContent-Disposition: attachment; filename=live.ics\n\n{}--b1--\n",
+            ics("1@x", "Lunch", "20261024"), ics("1@x", "Lunch", "20261024"), ics("2@x", "Live", "20261230")));
+        let names: Vec<_> = f.events.iter().map(|e| e.summary.as_str()).collect();
+        assert_eq!(names, ["Lunch", "Live"]);
+        assert_eq!(f.events[1].method, "publish");
+        // two events in one file; a changed date of a repeating one is not a third
+        let both = parse_events("BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:a\nDTSTART:20261024T040000Z\nRRULE:FREQ=WEEKLY\nSUMMARY:Class\nEND:VEVENT\n\
+BEGIN:VEVENT\nUID:a\nRECURRENCE-ID:20261031T040000Z\nDTSTART:20261101T040000Z\nSUMMARY:Class\nEND:VEVENT\n\
+BEGIN:VEVENT\nUID:b\nDTSTART:20261230T090000Z\nSUMMARY:Live\nSTATUS:CANCELLED\nEND:VEVENT\nEND:VCALENDAR\n");
+        assert_eq!(both.iter().map(|e| (e.summary.as_str(), e.method.as_str())).collect::<Vec<_>>(), [("Class", ""), ("Live", "cancel")]);
+    }
+
     #[test]
     fn invitations_are_read() {
         let ics = "BEGIN:VCALENDAR\nMETHOD:REQUEST\nBEGIN:VTIMEZONE\nTZID:Asia/Tokyo\nBEGIN:STANDARD\nDTSTART:19700101T000000\nEND:STANDARD\nEND:VTIMEZONE\n\
@@ -805,7 +863,7 @@ BEGIN:VEVENT\nDTSTART;TZID=Asia/Tokyo:20261010T130000\nDTEND;TZID=Asia/Tokyo:202
 ORGANIZER;CN=Aoife Byrne:mailto:aoife@example.com\nATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;CN=\"Byrne, Dan\";X-NUM-GUESTS=0:mailto:D\n an@example.com\n\
 ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:x@example.com\nSUMMARY:Lunch\\, then a walk\nLOCATION:Cafe\\; upstairs\n\
 BEGIN:VALARM\nDESCRIPTION:Reminder\nEND:VALARM\nEND:VEVENT\nEND:VCALENDAR\n";
-        let e = parse_event(&ics.replace('\n', "\r\n")).unwrap();
+        let e = first_event(&ics.replace('\n', "\r\n")).unwrap();
         assert_eq!(e.method, "request");
         assert_eq!(e.summary, "Lunch, then a walk");
         assert_eq!(e.location, "Cafe; upstairs");
@@ -815,15 +873,15 @@ BEGIN:VALARM\nDESCRIPTION:Reminder\nEND:VALARM\nEND:VEVENT\nEND:VCALENDAR\n";
         assert_eq!((e.attendees[0].name.as_str(), e.attendees[0].email.as_str(), e.attendees[0].status.as_str()), ("Byrne, Dan", "dan@example.com", "accepted"));
         assert_eq!(e.attendees[1].status, "");
         assert!(e.recurs);
-        let day = parse_event("BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261224\nDTEND;VALUE=DATE:20261226\nSUMMARY:Away\nEND:VEVENT\n").unwrap();
+        let day = first_event("BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261224\nDTEND;VALUE=DATE:20261226\nSUMMARY:Away\nEND:VEVENT\n").unwrap();
         assert!(day.start.all_day && day.start.tz.is_empty());
-        let utc = parse_event("BEGIN:VEVENT\nDTSTART:20261010T040000Z\nSUMMARY:x\nSTATUS:CANCELLED\nEND:VEVENT\n").unwrap();
+        let utc = first_event("BEGIN:VEVENT\nDTSTART:20261010T040000Z\nSUMMARY:x\nSTATUS:CANCELLED\nEND:VEVENT\n").unwrap();
         assert_eq!((utc.start.value.as_str(), utc.start.tz.as_str(), utc.method.as_str()), ("20261010T040000", "UTC", "cancel"));
-        assert!(parse_event("BEGIN:VCALENDAR\nEND:VCALENDAR\n").is_none());
+        assert!(first_event("BEGIN:VCALENDAR\nEND:VCALENDAR\n").is_none());
         // as a part of a message
         let f = of(&format!("From: a@example.com\nSubject: s\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=b1\n\n\
 --b1\nContent-Type: text/plain\n\nInvitation\n--b1\nContent-Type: text/calendar; method=REQUEST; charset=utf-8\n\n{ics}--b1--\n"));
-        assert_eq!(f.event.unwrap().summary, "Lunch, then a walk");
+        assert_eq!(f.events[0].summary, "Lunch, then a walk");
     }
 
     #[test]
@@ -887,7 +945,7 @@ BEGIN:VALARM\nDESCRIPTION:Reminder\nEND:VALARM\nEND:VEVENT\nEND:VCALENDAR\n";
             if let Some(g) = &f.group {
                 count(format!("group rewritten={} named={} sender={}", g.rewritten, !g.sender_name.is_empty(), g.trust.as_ref().map(|t| t.level).unwrap_or("no record")));
             }
-            if let Some(e) = &f.event {
+            for e in &f.events {
                 count(format!("event method={} tz={} attendees={}", e.method, if e.start.all_day { "all-day" } else if e.start.tz == "UTC" { "utc" } else if e.start.tz.is_empty() { "floating" } else { "named" }, e.attendees.len().min(3)));
             }
             for card in &f.cards {

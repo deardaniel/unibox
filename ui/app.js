@@ -1615,7 +1615,7 @@ function fill(node, m) {
     }
     // what the message says about itself in a form a program can read, unless it may be forged
     if (senderTrust(m)?.level !== "failed") {
-      if (m.facts?.event) content.append(eventCard(m.facts.event));
+      for (const e of m.facts?.events || []) content.append(eventCard(e));
       for (const c of m.facts?.cards || []) content.append(bookingCard(c));
     }
   }

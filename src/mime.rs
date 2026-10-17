@@ -114,7 +114,7 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 }
 
 /// Bump when `summarize` changes, so stored messages are summarised again at startup.
-pub const SUMMARY_VERSION: &str = "7";
+pub const SUMMARY_VERSION: &str = "8";
 
 /// What we keep alongside the raw message for the list view and for search.
 pub struct Summary {
