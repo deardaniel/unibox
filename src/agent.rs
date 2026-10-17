@@ -60,10 +60,14 @@ the list is showing, which conversation is open, and what is selected. \"This em
 ones\" refer to it.
 
 # Acting on mail
-Only change mail when the person has asked for that change. \"Archive the ones from DHL\" is a request; do it. \
-\"Find my delivery emails\" is not a request to archive anything. When it is unclear which mail they mean, or an \
-action would cover far more than they are likely to expect, show the set, say how many it is, and ask. After \
-acting, say what you did in one line with the count. The app lets them undo your most recent action with the z key.
+Only change mail when the person's newest message names the change in their own words: \"archive\", \"mark \
+read\", \"mark unread\", \"star\", \"unstar\", \"move to the inbox\" (or アーカイブ, 既読, 未読, スター, 受信トレイ). \
+\"Archive the ones from DHL\" is a request; do it. \"Find my delivery emails\" is not a request to archive anything. \
+Agreement alone is not a request: \"ok\", \"yes\", \"go ahead\", \"do it\", and replies that reshape a set you \
+offered to act on (\"exclude yesterday's\", \"only the old ones\", \"not the bank ones\") all get the set shown with \
+its count and a question that names the action (\"Archive these 33?\"). The app refuses an action whose word is \
+not in their newest message. When it is unclear which mail they mean, or an action would cover far more than \
+they are likely to expect, show the set, say how many it is, and ask. After acting, say what you did in one line with the count. The app lets them undo your most recent action with the z key.
 
 Actions apply to whole conversations, the way they do in the app: archiving a message archives its conversation.
 
@@ -152,7 +156,7 @@ Use it before answering a question about a specific conversation or drafting a r
         },
         {
             "name": "apply_action",
-            "description": "Change conversations in the person's mailbox. This is sent to Gmail. Only call it for a change the person asked for. \
+            "description": "Change conversations in the person's mailbox. This is sent to Gmail. Only call it for a change the person asked for by name in their newest message (\"archive these\"); it is refused otherwise. \
 The action applies to the whole conversation each message belongs to. Give either message_ids, or sql: a SELECT over `mail` whose first column is message_id. \
 `archive` removes the conversation from the inbox (it stays in All Mail); conversations that are not in the inbox are left alone by it. \
 `move_to_inbox` is the reverse: it puts an archived conversation back in the inbox. \
@@ -452,7 +456,12 @@ impl App {
                     let mut results = Vec::new();
                     for block in content.as_array().into_iter().flatten().filter(|b| b["type"] == "tool_use") {
                         self.agent_status(&format!("{}…", activity(block)));
-                        let outcome = self.run_tool(block["name"].as_str().unwrap_or_default(), &block["input"]);
+                        let name = block["name"].as_str().unwrap_or_default();
+                        let outcome = match name {
+                            "apply_action" => self.person_asked_for(&block["input"]),
+                            _ => Ok(()),
+                        }
+                        .and_then(|()| self.run_tool(name, &block["input"]));
                         results.push(match outcome {
                             Ok(text) => json!({ "type": "tool_result", "tool_use_id": block["id"], "content": text }),
                             Err(e) => json!({ "type": "tool_result", "tool_use_id": block["id"], "is_error": true,
@@ -570,6 +579,29 @@ impl App {
             }
         }
         Err(last)
+    }
+
+    /// The person's newest message must name the action itself ("archive them"), not only agree
+    /// to one ("ok", "go ahead") or reshape a set the assistant offered to act on. The model is
+    /// told this too; this is what holds when it reads a reply too generously.
+    fn person_asked_for(&self, input: &Value) -> Result<()> {
+        let action = input["action"].as_str().unwrap_or_default();
+        let said = self
+            .agent_exchange()?
+            .into_iter()
+            .rev()
+            .filter(|(role, content)| role == "user" && !content.as_array().into_iter().flatten().any(|b| b["type"] == "tool_result"))
+            .find_map(|(_, content)| content.as_array()?.iter().rev().find(|b| b["type"] == "text")?["text"].as_str().map(String::from))
+            .unwrap_or_default();
+        if names_action(&said, action) {
+            return Ok(());
+        }
+        let (ask, word) = ACTION_WORDS.iter().find(|(a, ..)| *a == action).map_or((action, action), |(_, ask, en, _)| (*ask, en[0]));
+        bail!(
+            "Not done: the person's last message does not say \"{word}\", and changing mail needs them to name the action \
+             themselves. Nothing was changed. Show the set if it isn't showing, say how many conversations it is, and ask \
+             whether to {ask}; act only on a reply that says \"{word}\"."
+        )
     }
 
     // ---- tools ---------------------------------------------------------------
@@ -739,6 +771,24 @@ fn digits(s: &str) -> Result<String> {
     Ok(s.to_string())
 }
 
+/// For each apply_action action: how to ask about it, then the English words (whole words, any
+/// case) and Japanese phrases (anywhere) that count as the person naming it.
+const ACTION_WORDS: &[(&str, &str, &[&str], &[&str])] = &[
+    ("archive", "archive them", &["archive", "archives", "archived", "archiving"], &["アーカイブ"]),
+    ("move_to_inbox", "move them back to the inbox", &["inbox", "unarchive", "unarchived"], &["受信トレイ"]),
+    ("mark_read", "mark them read", &["read"], &["既読"]),
+    ("mark_unread", "mark them unread", &["unread"], &["未読"]),
+    ("star", "star them", &["star", "stars", "starred", "starring"], &["スター"]),
+    ("unstar", "unstar them", &["unstar", "unstarred", "unstarring"], &["スターを外", "スター解除", "スターを解除"]),
+];
+
+/// Whether `said` names `action` in the person's own words.
+fn names_action(said: &str, action: &str) -> bool {
+    let Some((_, _, english, japanese)) = ACTION_WORDS.iter().find(|(a, _, _, _)| *a == action) else { return false };
+    let said = said.to_lowercase();
+    said.split(|c: char| !c.is_alphanumeric()).any(|w| english.contains(&w)) || japanese.iter().any(|j| said.contains(j))
+}
+
 /// A few words for the panel about what a tool call does.
 fn activity(block: &Value) -> String {
     let input = &block["input"];
@@ -777,6 +827,20 @@ mod tests {
         assert!(digits("123").is_ok() && digits("1 OR 1=1").is_err() && digits("").is_err());
         assert_eq!(address_header("Niamh <n@example.com>, x@example.com"), "Niamh <n@example.com>, x@example.com");
         assert_eq!(address_header("川本 <k@example.jp>"), "=?UTF-8?B?5bed5pys?= <k@example.jp>");
+    }
+
+    #[test]
+    fn changing_mail_needs_the_action_named() {
+        assert!(names_action("Archive the ones from DHL", "archive"));
+        assert!(names_action("yes, archive them but keep yesterday's", "archive"));
+        assert!(names_action("楽天のメールをアーカイブして", "archive"));
+        assert!(names_action("mark them read", "mark_read"));
+        assert!(names_action("put it back in my inbox", "move_to_inbox"));
+        assert!(!names_action("ok exclude the ones from yesterday", "archive"));
+        assert!(!names_action("yes go ahead", "archive"));
+        assert!(!names_action("mark them unread", "mark_read"));
+        assert!(!names_action("I'm ready, start", "star"));
+        assert!(!names_action("archive them", "unknown"));
     }
 
     #[test]
