@@ -578,6 +578,8 @@ async fn test_notification() -> Api<StatusCode> {
         title: "Unibox".into(),
         body: "Notifications from Unibox arrive like this. Click to bring the window forward.".into(),
         open: String::new(),
+        // pressing the button again replaces the toast rather than queueing another
+        tag: "test".into(),
     };
     let shown = blocking(move || notify::show(&toast, |_| {})).await;
     let outcome = shown.as_ref().map(|_| "shown".to_string()).unwrap_or_else(|e| e.1.clone());

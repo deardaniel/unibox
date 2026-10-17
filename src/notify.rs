@@ -55,13 +55,15 @@ pub struct Arrival {
     pub subject: String,
 }
 
-/// One toast to show: title, text, and the conversation ("account:thread") clicking it opens,
-/// empty for none.
+/// One toast to show: title, text, the conversation ("account:thread") clicking it opens (empty
+/// for none), and its tag. Windows shows one toast at a time and queues the rest; a toast with
+/// the tag of one already there replaces it instead of waiting behind it.
 #[derive(Debug, PartialEq)]
 pub struct Toast {
     pub title: String,
     pub body: String,
     pub open: String,
+    pub tag: String,
 }
 
 /// The toasts for mail that just arrived in `account`'s inbox, in the page's language `lang`:
@@ -70,13 +72,15 @@ pub fn toasts(new: &[Arrival], account: &str, lang: &str) -> Vec<Toast> {
     let ja = lang.starts_with("ja");
     if new.len() > MAX_EACH {
         let title = if ja { format!("{} 件の新着メッセージ", new.len()) } else { format!("{} new messages", new.len()) };
-        return vec![Toast { title, body: account.to_string(), open: String::new() }];
+        return vec![Toast { title, body: account.to_string(), open: String::new(), tag: format!("count:{account}") }];
     }
     new.iter()
         .map(|a| Toast {
             title: a.from.clone(),
             body: if ja && a.subject == "(no subject)" { "(件名なし)".into() } else { a.subject.clone() },
             open: format!("{}:{}", a.account_id, a.thrid),
+            // one toast per conversation: a second message in it takes the first one's place
+            tag: format!("{}:{}", a.account_id, a.thrid),
         })
         .collect()
 }
@@ -104,6 +108,10 @@ pub fn show(toast: &Toast, clicked: impl Fn(&str) + Send + 'static) -> anyhow::R
     let doc = XmlDocument::new()?;
     doc.LoadXml(&HSTRING::from(toast_xml(&toast.title, &toast.body, &toast.open)))?;
     let shown = ToastNotification::CreateToastNotification(&doc)?;
+    if !toast.tag.is_empty() {
+        // at most 64 characters
+        shown.SetTag(&HSTRING::from(toast.tag.chars().take(64).collect::<String>()))?;
+    }
     shown.Activated(&TypedEventHandler::new(move |_, args: windows::core::Ref<windows::core::IInspectable>| {
         crate::window::focus();
         let open = args.ok()?.cast::<ToastActivatedEventArgs>()?.Arguments()?;
@@ -145,12 +153,17 @@ mod tests {
         let three: Vec<_> = (1..=3).map(arrival).collect();
         let each = toasts(&three, "me@example.com", "en-US");
         assert_eq!(each.len(), 3);
-        assert_eq!(each[0], Toast { title: "Sender 1".into(), body: "(no subject)".into(), open: "2:1".into() });
+        assert_eq!(each[0], Toast { title: "Sender 1".into(), body: "(no subject)".into(), open: "2:1".into(), tag: "2:1".into() });
         assert_eq!(toasts(&three, "me@example.com", "ja-JP")[0].body, "(件名なし)");
         let four: Vec<_> = (1..=4).map(arrival).collect();
         assert_eq!(
             toasts(&four, "me@example.com", "en-GB"),
-            vec![Toast { title: "4 new messages".into(), body: "me@example.com".into(), open: String::new() }]
+            vec![Toast {
+                title: "4 new messages".into(),
+                body: "me@example.com".into(),
+                open: String::new(),
+                tag: "count:me@example.com".into()
+            }]
         );
         assert!(toasts(&[], "me@example.com", "en-US").is_empty());
     }
