@@ -1073,6 +1073,8 @@ mod window {
                 Event::WindowEvent { event: WindowEvent::Focused(false), .. } => IN_FRONT.store(false, Ordering::Relaxed),
                 Event::WindowEvent { window_id, event: WindowEvent::Focused(true), .. } => {
                     IN_FRONT.store(true, Ordering::Relaxed);
+                    // the inbox is in view: its notifications have done their job
+                    std::thread::spawn(crate::notify::clear);
                     if let Some((view, _)) = windows.get(&window_id) {
                         let _ = view.focus();
                     }

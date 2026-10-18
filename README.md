@@ -61,7 +61,10 @@ triage: replying opens the conversation in Gmail.
 - New-mail notifications: a Windows toast for each new unread message (one counting them when
   more than three arrive at once) while no Unibox window is in front; clicking it opens the
   conversation. Mail that arrived while the app was closed, your own sent mail and anything
-  older than a day stay quiet. Turned off in Appearance.
+  older than a day stay quiet. After five minutes without a key press or mouse move, new mail
+  is held, and coming back shows one toast for all of it (leaving out what was read elsewhere
+  meanwhile) instead of Windows playing every one back in turn. Bringing Unibox to the front
+  clears its notifications. Turned off in Appearance.
 
 **Privacy**
 

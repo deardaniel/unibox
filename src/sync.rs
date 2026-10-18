@@ -41,6 +41,8 @@ const SYNC_EVERY_WATCHED: Duration = Duration::from_secs(900);
 const IDLE_FOR: Duration = Duration::from_secs(240);
 /// How long one pass may spend preloading before it goes back to check for new mail.
 const PRELOAD_BUDGET: Duration = Duration::from_secs(40);
+/// No key pressed or mouse moved for this long, and new mail waits for one toast on return.
+const AWAY_AFTER: Duration = Duration::from_secs(300);
 /// How often opening a conversation re-checks All Mail for replies sent from elsewhere.
 const REHYDRATE_AFTER: Duration = Duration::from_secs(600);
 
@@ -71,6 +73,9 @@ pub struct App {
     /// Accounts whose inbox has been listed since the app started. Mail found on that first
     /// listing arrived while the app was closed, and gets no notification.
     listed: Mutex<HashSet<i64>>,
+    /// New mail that arrived while nobody was at the PC, newest first, kept for one toast
+    /// when someone is back.
+    held: Mutex<Vec<crate::notify::Arrival>>,
 }
 
 impl App {
@@ -91,6 +96,7 @@ impl App {
             doing: Mutex::new(HashMap::new()),
             agent: Default::default(),
             listed: Mutex::new(HashSet::new()),
+            held: Mutex::new(Vec::new()),
         })
     }
 
@@ -227,6 +233,13 @@ impl App {
     }
 
     pub fn start(self: &Arc<App>) {
+        // Watches for someone coming back to the PC, to tell them what arrived meanwhile.
+        let watcher = self.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(2));
+            watcher.welcome_back();
+        });
+
         // The push thread sends queued changes (archive, read, star) to Gmail.
         let (push_tx, push_rx) = mpsc::channel();
         *self.push_wake.lock().unwrap() = Some(push_tx);
@@ -1030,23 +1043,64 @@ impl App {
         self.db.meta("notify").ok().flatten().as_deref() != Some("off")
     }
 
-    /// Show a notification for mail that just arrived, unless they are off or Unibox is in front.
+    /// Show a notification for mail that just arrived, unless they are off or Unibox is in
+    /// front. While nobody is at the PC it is held for one toast on their return instead:
+    /// otherwise Windows saves up every toast and plays them back one by one.
     fn announce(&self, email: &str, arrived: &[crate::notify::Arrival]) {
         if arrived.is_empty() || !self.notify_on() || crate::notify::app_in_front() {
             return;
         }
+        if crate::notify::idle() >= AWAY_AFTER {
+            let mut held = self.held.lock().unwrap();
+            held.splice(0..0, arrived.iter().cloned());
+            held.truncate(500);
+            crate::doctor::note("app", "Windows", &format!("New mail notification, {} new", arrived.len()), "held: nobody at the PC", true, None);
+            return;
+        }
         let lang = self.db.meta("notify-lang").ok().flatten().unwrap_or_default();
         for toast in crate::notify::toasts(arrived, email, &lang) {
-            let events = self.events.clone();
-            // clicking opens the conversation in the main window
-            let shown = crate::notify::show(&toast, move |open| {
-                if !open.is_empty() {
-                    let _ = events.send(serde_json::json!({ "kind": "open", "detail": open }).to_string());
-                }
-            });
-            let outcome = shown.as_ref().map(|_| "shown".to_string()).unwrap_or_else(|e| e.to_string());
-            crate::doctor::note("app", "Windows", &format!("New mail notification, {} arrived", arrived.len()), &outcome, shown.is_ok(), None);
+            self.show_toast(&toast, arrived.len());
         }
+    }
+
+    /// Once someone is at the PC again, one toast for the mail held while they were away,
+    /// leaving out what was read or archived meanwhile (on a phone, say).
+    fn welcome_back(&self) {
+        if self.held.lock().unwrap().is_empty() || crate::notify::idle() > Duration::from_secs(5) {
+            return;
+        }
+        let held = std::mem::take(&mut *self.held.lock().unwrap());
+        if !self.notify_on() || crate::notify::app_in_front() {
+            return;
+        }
+        let Ok(c) = self.db.conn() else { return };
+        let unread: Vec<_> = held
+            .into_iter()
+            .filter(|a| {
+                c.query_row(
+                    "SELECT 1 FROM messages WHERE account_id=? AND gm_msgid=? AND seen=0 AND in_inbox=1",
+                    params![a.account_id, a.gm_msgid],
+                    |_| Ok(()),
+                )
+                .is_ok()
+            })
+            .collect();
+        let lang = self.db.meta("notify-lang").ok().flatten().unwrap_or_default();
+        if let Some(toast) = crate::notify::away_toast(&unread, &lang) {
+            self.show_toast(&toast, unread.len());
+        }
+    }
+
+    fn show_toast(&self, toast: &crate::notify::Toast, messages: usize) {
+        let events = self.events.clone();
+        // clicking opens the conversation in the main window
+        let shown = crate::notify::show(toast, move |open| {
+            if !open.is_empty() {
+                let _ = events.send(serde_json::json!({ "kind": "open", "detail": open }).to_string());
+            }
+        });
+        let outcome = shown.as_ref().map(|_| "shown".to_string()).unwrap_or_else(|e| e.to_string());
+        crate::doctor::note("app", "Windows", &format!("New mail notification, {messages} new"), &outcome, shown.is_ok(), None);
     }
 
     pub fn log(&self, line: &str) {
@@ -1104,6 +1158,7 @@ fn arrival(account_id: i64, email: &str, f: &Fetched) -> Option<crate::notify::A
     }
     Some(crate::notify::Arrival {
         account_id,
+        gm_msgid: f.get("X-GM-MSGID")?.text(),
         thrid: f.get("X-GM-THRID")?.text(),
         from: if headers.from_name.is_empty() { headers.from_addr } else { headers.from_name },
         subject: headers.subject,

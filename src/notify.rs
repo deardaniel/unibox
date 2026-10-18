@@ -48,8 +48,10 @@ fn register() -> windows::core::Result<()> {
 const MAX_EACH: usize = 3;
 
 /// A message that just arrived in the inbox, for its toast.
+#[derive(Clone)]
 pub struct Arrival {
     pub account_id: i64,
+    pub gm_msgid: String,
     pub thrid: String,
     pub from: String,
     pub subject: String,
@@ -83,6 +85,76 @@ pub fn toasts(new: &[Arrival], account: &str, lang: &str) -> Vec<Toast> {
             tag: format!("{}:{}", a.account_id, a.thrid),
         })
         .collect()
+}
+
+/// The one toast for mail that arrived while nobody was at the PC, newest first in `held`:
+/// how many, and who from. A single message gets its usual toast.
+pub fn away_toast(held: &[Arrival], lang: &str) -> Option<Toast> {
+    let ja = lang.starts_with("ja");
+    match held {
+        [] => None,
+        [one] => toasts(std::slice::from_ref(one), "", lang).pop(),
+        _ => {
+            let mut senders: Vec<&str> = Vec::new();
+            for a in held {
+                if !senders.contains(&a.from.as_str()) {
+                    senders.push(&a.from);
+                }
+            }
+            let (shown, more) = (senders.len().min(3), senders.len().saturating_sub(3));
+            let names = senders[..shown].join(if ja { "、" } else { ", " });
+            Some(Toast {
+                title: if ja { format!("離席中に {} 件の新着メッセージ", held.len()) } else { format!("{} new messages while you were away", held.len()) },
+                body: match (more, ja) {
+                    (0, _) => names,
+                    (n, true) => format!("{names} ほか {n} 人"),
+                    (1, false) => format!("{names} and 1 other"),
+                    (n, false) => format!("{names} and {n} others"),
+                },
+                open: String::new(),
+                tag: "away".into(),
+            })
+        }
+    }
+}
+
+/// How long since the last key press or mouse move anywhere on the PC (zero where unknown).
+/// The screen turning off or locking stops input too, so this also covers those.
+pub fn idle() -> std::time::Duration {
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct LastInputInfo {
+            size: u32,
+            time: u32,
+        }
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetLastInputInfo(info: *mut LastInputInfo) -> i32;
+        }
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetTickCount() -> u32;
+        }
+        let mut info = LastInputInfo { size: std::mem::size_of::<LastInputInfo>() as u32, time: 0 };
+        if unsafe { GetLastInputInfo(&mut info) } != 0 {
+            // both count milliseconds since boot and wrap together after 49 days
+            return std::time::Duration::from_millis(unsafe { GetTickCount() }.wrapping_sub(info.time) as u64);
+        }
+    }
+    std::time::Duration::ZERO
+}
+
+/// Take Unibox's notifications away, from Notification Center and from the queue of those
+/// still waiting to be shown: the inbox they point at is in front of the person now.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn clear() {
+    #[cfg(windows)]
+    {
+        use windows::core::HSTRING;
+        use windows::UI::Notifications::ToastNotificationManager;
+        let _ = ToastNotificationManager::History().and_then(|h| h.ClearWithId(&HSTRING::from(AUMID)));
+    }
 }
 
 /// Whether one of Unibox's windows is the one in front, so new mail is in view already.
@@ -145,7 +217,7 @@ mod tests {
     }
 
     fn arrival(n: usize) -> Arrival {
-        Arrival { account_id: 2, thrid: format!("{n}"), from: format!("Sender {n}"), subject: "(no subject)".into() }
+        Arrival { account_id: 2, gm_msgid: format!("m{n}"), thrid: format!("{n}"), from: format!("Sender {n}"), subject: "(no subject)".into() }
     }
 
     #[test]
@@ -166,5 +238,20 @@ mod tests {
             }]
         );
         assert!(toasts(&[], "me@example.com", "en-US").is_empty());
+    }
+
+    #[test]
+    fn mail_from_while_away_is_one_toast() {
+        assert!(away_toast(&[], "en-US").is_none());
+        assert_eq!(away_toast(&[arrival(1)], "en-US").unwrap().open, "2:1");
+        let mut held: Vec<_> = (1..=6).map(arrival).collect();
+        held.push(arrival(1)); // a second message from someone already named
+        let t = away_toast(&held, "en-US").unwrap();
+        assert_eq!(t.title, "7 new messages while you were away");
+        assert_eq!(t.body, "Sender 1, Sender 2, Sender 3 and 3 others");
+        assert_eq!(t.tag, "away");
+        assert_eq!(away_toast(&held[..4], "en-US").unwrap().body, "Sender 1, Sender 2, Sender 3 and 1 other");
+        assert_eq!(away_toast(&held[..2], "ja-JP").unwrap().body, "Sender 1、Sender 2");
+        assert_eq!(away_toast(&held, "ja-JP").unwrap().body, "Sender 1、Sender 2、Sender 3 ほか 3 人");
     }
 }
