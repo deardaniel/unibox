@@ -441,7 +441,9 @@ async function loadThreads() {
   const asked = listParams().toString();
   const rows = await fetchThreads(asked);
   if (asked !== listParams().toString()) return;   // the list has changed since; a newer answer is coming
+  traceList("loadThreads", rows, true);
   state.threads = applyOverrides(rows);
+  traceList("loadThreads", state.threads, false);
   renderList();
 }
 
@@ -1798,6 +1800,21 @@ function replyInGmail() {
 }
 
 // ---- actions ---------------------------------------------------------------
+// DEBUG (reappearing archives): what the page did and saw, into archive-trace.log on the server.
+const traced = new Map();   // thread key -> when it was archived here
+function trace(line) { fetch("/api/trace", { method: "POST", body: line }).catch(() => {}); }
+function traceList(where, rows, before) {
+  const now = Date.now();
+  for (const [k, at] of traced) if (now - at > 120000) traced.delete(k);
+  for (const t of rows) {
+    const at = traced.get(key(t));
+    if (at == null || state.all) continue;
+    const o = overrides.get(key(t));
+    trace(`REAPPEAR ${where}: ${key(t)} archived ${now - at}ms ago is ${before ? "in the list from the server" : "SHOWN"}`
+      + ` (override ${o ? JSON.stringify({ archive: o.archive, until: o.until === Infinity ? "pending" : o.until - now }) : "none"})`);
+  }
+}
+
 // A change shows at once, but a list refresh already on its way back from the server can still
 // carry the old state and would undo it on screen. Each change is remembered here until the
 // server has certainly caught up, and every list that arrives is corrected against it.
@@ -1875,6 +1892,7 @@ function act(op, list = targets(), { record = true } = {}) {
     const change = remember(k, { archive: op === "archive" ? true : op === "inbox" ? false : undefined,
       unread: op === "read" ? 0 : op === "unread" ? 1 : undefined,
       starred: op === "star" ? true : op === "unstar" ? false : undefined });
+    if (op === "archive") { traced.set(k, Date.now()); trace(`act archive ${k}`); }
     if (op === "archive" && state.all) {
       if (row) row.in_inbox = false;
     } else if (op === "archive") {
@@ -1891,7 +1909,7 @@ function act(op, list = targets(), { record = true } = {}) {
     // the server answers with the messages it changed, which is what an undo needs
     const sent = whenDone(k, () => api(`/api/thread/${t.account_id}/${t.thrid}/action`, { body: { op } }))
       .catch(e => { overrides.delete(k); refreshSoon(); toast(tx("That didn't go through: {why}", { why: txServer(e.message) })); return null; })
-      .finally(() => settled(k, change));
+      .finally(() => { settled(k, change); if (op === "archive") trace(`act archive ${k}: server answered, override ends in 3s`); });
     if (!undoing) lastAction.items.push({ t: row || t, index, sent });
   }
   // Marking and starring leave the selection alone, so the same conversations can be marked
@@ -1910,6 +1928,7 @@ function act(op, list = targets(), { record = true } = {}) {
 const INVERSE = { read: "unread", unread: "read", star: "unstar", unstar: "star", inbox: "archive" };
 async function undo() {
   const last = lastAction;
+  trace(`undo ${last?.op} ${last?.items.map(i => key(i.t)).join(",")}`);
   if (!last) return toast(tx("Nothing to undo."));
   lastAction = null;
   if (last.op !== "archive") {
@@ -2589,7 +2608,9 @@ async function refresh() {
   let rows = await fetchThreads(asked);
   if (asked !== listParams().toString()) return;
   const at = state.open?.key || (state.threads[state.cursor] && key(state.threads[state.cursor]));
+  traceList("refresh", rows, true);
   rows = applyOverrides(rows, state.threads);
+  traceList("refresh", rows, false);
   state.threads = rows;
   const again = rows.findIndex(t => key(t) === at);
   if (again >= 0) state.cursor = again;

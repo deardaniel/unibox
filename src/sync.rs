@@ -76,6 +76,8 @@ pub struct App {
     /// New mail that arrived while nobody was at the PC, newest first, kept for one toast
     /// when someone is back.
     held: Mutex<Vec<crate::notify::Arrival>>,
+    /// DEBUG (reappearing archives): conversations archived lately, and when.
+    pub archived_at: Mutex<HashMap<(i64, String), Instant>>,
 }
 
 impl App {
@@ -97,6 +99,7 @@ impl App {
             agent: Default::default(),
             listed: Mutex::new(HashSet::new()),
             held: Mutex::new(Vec::new()),
+            archived_at: Mutex::new(HashMap::new()),
         })
     }
 
@@ -210,6 +213,7 @@ impl App {
                         dropped = false;
                         retry = Duration::from_secs(15);
                         if changed {
+                            app.trace(&format!("idle {}: Gmail reported a change, sync requested", acct.email));
                             app.request_sync(Some(account_id));
                         }
                         if !matches!(app.db.account(account_id), Ok(Some(_))) {
@@ -367,12 +371,16 @@ impl App {
         let mut imap = self.connect(email)?;
         let new_uids = {
             let lock = self.lock_for(account_id);
+            let waited = Instant::now();
             let _guard = lock.lock().unwrap();
+            self.trace(&format!("sync {email}: lock taken after {}ms", waited.elapsed().as_millis()));
             // Open the inbox only once the lock is held. Opened before, while a change was being
             // pushed, it can still list the messages that change archived; reconciled against
             // that, they are put back in the inbox.
             let exists = imap.select("INBOX", false)?;
+            self.trace(&format!("sync {email}: INBOX selected, exists={exists}"));
             let listing = if exists == 0 { Vec::new() } else { imap.uid_fetch("1:*", "(UID X-GM-MSGID FLAGS)")? };
+            self.trace(&format!("sync {email}: listing has {} message(s)", listing.len()));
             self.reconcile(account_id, &listing)?
         };
         self.emit("changed", email);
@@ -714,6 +722,19 @@ impl App {
             }
             if known.contains(&msgid) {
                 let (seen, starred) = fetched_flags(f);
+                let was: Option<(bool, String)> = tx
+                    .query_row(
+                        "SELECT in_inbox, gm_thrid FROM messages WHERE account_id=? AND gm_msgid=?",
+                        params![account_id, msgid],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .ok();
+                if let Some((false, thrid)) = &was {
+                    let ago = self.archived_at.lock().unwrap().get(&(account_id, thrid.clone())).map(|t| t.elapsed().as_millis());
+                    self.trace(&format!(
+                        "REAPPEAR reconcile: account {account_id} msg {msgid} thread {thrid} uid {uid} back in inbox (archived {ago:?}ms ago)"
+                    ));
+                }
                 tx.execute(
                     "UPDATE messages SET uid=?, in_inbox=1, seen=?, starred=? WHERE account_id=? AND gm_msgid=?",
                     params![uid, seen, starred, account_id, msgid],
@@ -727,6 +748,9 @@ impl App {
             let rows = st.query_map([account_id], |r| r.get::<_, String>(0))?;
             rows.filter_map(|r| r.ok()).filter(|m| !on_server.contains(m) && !pending.contains(m)).collect()
         };
+        if !gone.is_empty() {
+            self.trace(&format!("reconcile: account {account_id}: {} message(s) left the inbox on Gmail", gone.len()));
+        }
         for msgid in gone {
             tx.execute(
                 "UPDATE messages SET in_inbox=0, uid=NULL WHERE account_id=? AND gm_msgid=?",
@@ -854,6 +878,13 @@ impl App {
             )?;
         }
         tx.commit()?;
+        self.trace(&format!(
+            "act {op}: account {account_id} thread {thrid}: {:?}",
+            targets.iter().map(|(m, u, i)| format!("{m}/uid{u}/{}", if *i { "inbox" } else { "all" })).collect::<Vec<_>>()
+        ));
+        if op == "archive" {
+            self.archived_at.lock().unwrap().insert((account_id, thrid.to_string()), Instant::now());
+        }
         if !targets.is_empty() {
             self.emit("changed", &acct.email);
             self.push_soon();
@@ -864,6 +895,7 @@ impl App {
     /// Undo an archive: put these messages back in the inbox. An archive that has not been
     /// sent yet is simply withdrawn; one that has is reversed on Gmail.
     pub fn unarchive(&self, account_id: i64, msgids: &[String]) -> Result<()> {
+        self.trace(&format!("REAPPEAR? unarchive (undo): account {account_id} msgs {msgids:?}"));
         let acct = self.db.account(account_id)?.ok_or_else(|| anyhow!("no such account"))?;
         // Holding the account lock means the push thread is not half-way through these.
         let lock = self.lock_for(account_id);
@@ -945,6 +977,11 @@ impl App {
                 let mut all_mail = None;
                 for (op, batch) in &batches {
                     let uids: Vec<u32> = batch.iter().map(|r| r.4).collect();
+                    self.trace(&format!(
+                        "push {}: sending {op} for {:?}",
+                        acct.email,
+                        batch.iter().map(|r| format!("{}/uid{}", r.2, r.4)).collect::<Vec<_>>()
+                    ));
                     let set = uid_set(&uids);
                     match *op {
                         // Moving to All Mail is how Gmail spells "archive" over IMAP.
@@ -1015,6 +1052,7 @@ impl App {
                         done.push(r.0);
                     }
                     self.log(&format!("{}: {op} sent for {} message(s)", acct.email, batch.len()));
+                    self.trace(&format!("push {}: {op} done, pending rows cleared", acct.email));
                 }
                 imap.logout();
                 // messages put back in the inbox need their new inbox UIDs
@@ -1027,6 +1065,7 @@ impl App {
                 // Give up on what is left for this account. The local copy is now wrong for
                 // those messages; the next sync puts back what Gmail really has.
                 self.log(&format!("account {account_id}: sending changes failed: {e:#}"));
+                self.trace(&format!("REAPPEAR? push failed for account {account_id}, queue dropped: {e:#}"));
                 if let Ok(c) = self.db.conn() {
                     for (_, batch) in &batches {
                         for r in batch.iter().filter(|r| !done.contains(&r.0)) {
@@ -1104,6 +1143,20 @@ impl App {
         });
         let outcome = shown.as_ref().map(|_| "shown".to_string()).unwrap_or_else(|e| e.to_string());
         crate::doctor::note("app", "Windows", &format!("New mail notification, {messages} new"), &outcome, shown.is_ok(), None);
+    }
+
+    /// DEBUG (reappearing archives): a line with milliseconds in archive-trace.log.
+    pub fn trace(&self, line: &str) {
+        use std::io::Write;
+        let path = self.dir.join("archive-trace.log");
+        if std::fs::metadata(&path).map(|m| m.len() > 5_000_000).unwrap_or(false) {
+            let _ = std::fs::remove_file(&path);
+        }
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let thread = format!("{:?}", std::thread::current().id());
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = f.write_all(format!("{ms} {thread} {line}\n").as_bytes());
+        }
     }
 
     pub fn log(&self, line: &str) {

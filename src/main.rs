@@ -186,7 +186,24 @@ async fn list_threads(State(app): State<Arc<App>>, Query(q): Query<ThreadQuery>)
             return app.db.threads_by_keys(&keys);
         }
         let keep: Vec<&str> = q.keep.split(',').filter(|k| !k.is_empty()).collect();
-        app.db.threads(q.account, q.q.trim(), q.unread, &q.kind, &serde_json::to_string(&keep)?, q.all, q.from.trim())
+        let began = std::time::Instant::now();
+        let rows = app.db.threads(q.account, q.q.trim(), q.unread, &q.kind, &serde_json::to_string(&keep)?, q.all, q.from.trim())?;
+        // DEBUG (reappearing archives): a conversation archived lately that this list still has in the inbox
+        if !q.all {
+            let recent = app.archived_at.lock().unwrap().clone();
+            for t in &rows {
+                if let Some(at) = recent.get(&(t.account_id, t.thrid.clone())) {
+                    if at.elapsed().as_secs() < 120 {
+                        app.trace(&format!(
+                            "REAPPEAR list: thread {}:{} archived {}ms ago is in the list sent to the page (query took {}ms)",
+                            t.account_id, t.thrid, at.elapsed().as_millis(), began.elapsed().as_millis()
+                        ));
+                    }
+                }
+            }
+            app.trace(&format!("list: {} conversation(s), query took {}ms", rows.len(), began.elapsed().as_millis()));
+        }
+        Ok(rows)
     })
     .await?;
     Ok(Json(
@@ -504,6 +521,12 @@ struct Unarchive {
     msgids: Vec<String>,
 }
 
+/// DEBUG (reappearing archives): what the page saw, into the same trace.
+async fn trace(State(app): State<Arc<App>>, body: String) -> StatusCode {
+    app.trace(&format!("page: {}", body.chars().take(2000).collect::<String>()));
+    StatusCode::NO_CONTENT
+}
+
 async fn unarchive(State(app): State<Arc<App>>, Json(body): Json<Unarchive>) -> Api<StatusCode> {
     blocking(move || app.unarchive(body.account_id, &body.msgids)).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -729,6 +752,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/unarchive", post(unarchive))
+        .route("/api/trace", post(trace))
         .route("/api/subscriptions", get(subscriptions))
         .route("/api/senders", get(senders))
         .route("/mcp", post(mcp_message))
