@@ -365,10 +365,13 @@ impl App {
     fn sync_account(&self, account_id: i64, email: &str) -> Result<bool> {
         let deadline = Instant::now() + PRELOAD_BUDGET;
         let mut imap = self.connect(email)?;
-        let exists = imap.select("INBOX", false)?;
         let new_uids = {
             let lock = self.lock_for(account_id);
             let _guard = lock.lock().unwrap();
+            // Open the inbox only once the lock is held. Opened before, while a change was being
+            // pushed, it can still list the messages that change archived; reconciled against
+            // that, they are put back in the inbox.
+            let exists = imap.select("INBOX", false)?;
             let listing = if exists == 0 { Vec::new() } else { imap.uid_fetch("1:*", "(UID X-GM-MSGID FLAGS)")? };
             self.reconcile(account_id, &listing)?
         };
