@@ -72,7 +72,7 @@ fn asset(name: &str, built_in: &'static str) -> String {
 }
 
 /// Bump when the way messages are rendered changes, so cached copies in the window are dropped.
-const RENDER_VERSION: &str = "12";
+const RENDER_VERSION: &str = "13";
 
 async fn index() -> impl IntoResponse {
     let html = asset("index.html", include_str!("../ui/index.html")).replace("__BUILD__", RENDER_VERSION);
