@@ -280,9 +280,14 @@ html.dk img:not([data-keep]){filter:invert(1) hue-rotate(180deg)}
 html.dk body{background:#d5d5d5}
 ";
 
+/// Kanji look Chinese unless the page says it is Japanese: mail that asks only for
+/// `sans-serif` and names no language gets Microsoft YaHei for them. Kana only occur in
+/// Japanese, so a message with any is marked as such.
 fn frame(body: &str) -> String {
+    let japanese = body.chars().any(|c| matches!(c, '\u{3041}'..='\u{30ff}' | '\u{ff66}'..='\u{ff9d}'));
+    let lang = if japanese { " lang=\"ja\"" } else { "" };
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><base target=\"_blank\">\
+        "<!doctype html><html{lang}><head><meta charset=\"utf-8\"><base target=\"_blank\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
          <style>{FRAME_CSS}</style></head><body>{body}</body></html>"
     )
@@ -445,6 +450,13 @@ Message-ID: <abc@mail.example.com>\r\nReferences: <one@x>\r\n <two@x>\r\n\r\nhi\
         assert_eq!(h.from_addr, "matt@example.com");
         assert_eq!(h.to, "Dan <dan@example.com>, x@example.com");
         assert_eq!(h.subject, "Hello");
+    }
+
+    #[test]
+    fn japanese_mail_is_marked_japanese() {
+        assert!(frame("<p>パスワードを無効化しております</p>").starts_with("<!doctype html><html lang=\"ja\">"));
+        assert!(frame("<p>密码已重置</p>").starts_with("<!doctype html><html><head>"));
+        assert!(frame("<p>hello</p>").starts_with("<!doctype html><html><head>"));
     }
 
     #[test]
