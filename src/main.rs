@@ -504,6 +504,11 @@ struct Unarchive {
     msgids: Vec<String>,
 }
 
+async fn unspam(State(app): State<Arc<App>>, Json(body): Json<Unarchive>) -> Api<StatusCode> {
+    blocking(move || app.unspam(body.account_id, &body.msgids)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn unarchive(State(app): State<Arc<App>>, Json(body): Json<Unarchive>) -> Api<StatusCode> {
     blocking(move || app.unarchive(body.account_id, &body.msgids)).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -729,6 +734,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/message/:id/cid/:cid", get(message_cid))
         .route("/api/message/:id/attachment/:index", get(message_attachment))
         .route("/api/unarchive", post(unarchive))
+        .route("/api/unspam", post(unspam))
         .route("/api/subscriptions", get(subscriptions))
         .route("/api/senders", get(senders))
         .route("/mcp", post(mcp_message))

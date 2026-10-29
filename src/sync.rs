@@ -796,6 +796,9 @@ impl App {
             }
             return Ok(msgids);
         }
+        if op == "spam" {
+            return self.report_spam(account_id, &acct.email, thrid);
+        }
         let local = match op {
             "archive" => "in_inbox=0",
             "read" => "seen=1",
@@ -859,6 +862,56 @@ impl App {
             self.push_soon();
         }
         Ok(targets.into_iter().map(|(msgid, _, _)| msgid).collect())
+    }
+
+    /// Report a whole conversation as spam: every message of it goes to Gmail's Spam folder,
+    /// which is how Gmail is told over IMAP. Locally the conversation is set aside at once,
+    /// so it leaves the inbox and All Mail alike, and an undo can bring it back exactly.
+    fn report_spam(&self, account_id: i64, email: &str, thrid: &str) -> Result<Vec<String>> {
+        let mut c = self.db.conn()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let msgids: Vec<String> = {
+            let mut st = tx.prepare("SELECT gm_msgid FROM messages WHERE account_id=? AND gm_thrid=?")?;
+            let rows = st.query_map(params![account_id, thrid], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for msgid in &msgids {
+            // uid 0: looked up by message ID when sent, wherever it is by then
+            tx.execute("INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?,?,'spam',0)", params![account_id, msgid])?;
+        }
+        Db::hold(&tx, account_id, &msgids)?;
+        tx.commit()?;
+        if !msgids.is_empty() {
+            self.emit("changed", email);
+            self.push_soon();
+        }
+        Ok(msgids)
+    }
+
+    /// Undo a spam report: a report not sent yet is withdrawn and the conversation comes back
+    /// as it was; one already sent is reversed on Gmail, which puts the mail in the inbox
+    /// (as Gmail's own "Not spam" does).
+    pub fn unspam(&self, account_id: i64, msgids: &[String]) -> Result<()> {
+        let acct = self.db.account(account_id)?.ok_or_else(|| anyhow!("no such account"))?;
+        // Holding the account lock means the push thread is not half-way through these.
+        let lock = self.lock_for(account_id);
+        let _guard = lock.lock().unwrap();
+        let mut c = self.db.conn()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for msgid in msgids {
+            let withdrawn = tx.execute(
+                "DELETE FROM pending WHERE account_id=? AND gm_msgid=? AND op='spam'",
+                params![account_id, msgid],
+            )? > 0;
+            if !withdrawn {
+                tx.execute("INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?,?,'unspam',0)", params![account_id, msgid])?;
+            }
+            Db::restore_held(&tx, account_id, std::slice::from_ref(msgid), !withdrawn)?;
+        }
+        tx.commit()?;
+        self.emit("changed", &acct.email);
+        self.push_soon();
+        Ok(())
     }
 
     /// Undo an archive: put these messages back in the inbox. An archive that has not been
@@ -981,6 +1034,42 @@ impl App {
                             }
                             imap.select("INBOX", false)?;
                         }
+                        // Spam: whatever of it is in the inbox is moved from there, the rest from
+                        // All Mail. Either way it leaves every label, as reporting it in Gmail does.
+                        "spam" => {
+                            if all_mail.is_none() {
+                                all_mail = Some(imap.all_mail()?);
+                            }
+                            let junk = imap.special_folder("\\Junk")?;
+                            for folder in ["INBOX".to_string(), all_mail.clone().unwrap_or_default()] {
+                                imap.select(&folder, false)?;
+                                let mut found = Vec::new();
+                                for r in batch {
+                                    if r.2.chars().all(|c| c.is_ascii_digit()) {
+                                        found.extend(imap.uid_search(&format!("X-GM-MSGID {}", r.2))?);
+                                    }
+                                }
+                                if !found.is_empty() {
+                                    imap.run(&format!("UID MOVE {} {junk}", uid_set(&found)))?;
+                                }
+                            }
+                            imap.select("INBOX", false)?;
+                        }
+                        // The reverse: out of Spam and into the inbox.
+                        "unspam" => {
+                            let junk = imap.special_folder("\\Junk")?;
+                            imap.select(&junk, false)?;
+                            let mut found = Vec::new();
+                            for r in batch {
+                                if r.2.chars().all(|c| c.is_ascii_digit()) {
+                                    found.extend(imap.uid_search(&format!("X-GM-MSGID {}", r.2))?);
+                                }
+                            }
+                            if !found.is_empty() {
+                                imap.run(&format!("UID MOVE {} INBOX", uid_set(&found)))?;
+                            }
+                            imap.select("INBOX", false)?;
+                        }
                         // Marks on messages that are not in the inbox are set in All Mail.
                         marks if marks.starts_with("all:") => {
                             let change = match &marks[4..] {
@@ -1018,7 +1107,7 @@ impl App {
                 }
                 imap.logout();
                 // messages put back in the inbox need their new inbox UIDs
-                if batches.iter().any(|(op, _)| *op == "unarchive") {
+                if batches.iter().any(|(op, _)| *op == "unarchive" || *op == "unspam") {
                     self.sync_soon();
                 }
                 Ok(())
@@ -1028,9 +1117,17 @@ impl App {
                 // those messages; the next sync puts back what Gmail really has.
                 self.log(&format!("account {account_id}: sending changes failed: {e:#}"));
                 if let Ok(c) = self.db.conn() {
-                    for (_, batch) in &batches {
+                    for (op, batch) in &batches {
                         for r in batch.iter().filter(|r| !done.contains(&r.0)) {
                             let _ = c.execute("DELETE FROM pending WHERE id=?", [r.0]);
+                            // a conversation set aside for a report that never went is still
+                            // where it was on Gmail; one taken out of Spam locally still in Spam
+                            let one = std::slice::from_ref(&r.2);
+                            let _ = match *op {
+                                "spam" => Db::restore_held(&c, account_id, one, false),
+                                "unspam" => Db::hold(&c, account_id, one),
+                                _ => Ok(()),
+                            };
                         }
                     }
                 }

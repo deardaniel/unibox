@@ -1801,7 +1801,7 @@ function replyInGmail() {
 // A change shows at once, but a list refresh already on its way back from the server can still
 // carry the old state and would undo it on screen. Each change is remembered here until the
 // server has certainly caught up, and every list that arrives is corrected against it.
-const overrides = new Map();   // thread key -> { archive, unread, starred, until, change }
+const overrides = new Map();   // thread key -> { archive, spam, unread, starred, until, change }
 let changes = 0;
 /** Returns which change this is, for settled(): only the latest change to a conversation settles it. */
 function remember(k, change) {
@@ -1828,16 +1828,19 @@ function applyOverrides(rows, shown = []) {
   const now = Date.now();
   for (const [k, o] of overrides) if (o.until < now) overrides.delete(k);
   if (!overrides.size) return rows;
-  // an archived conversation leaves the inbox list; in All Mail it stays, no longer marked Inbox
-  rows = rows.filter(t => state.all || !overrides.get(key(t))?.archive).map(t => {
+  // an archived conversation leaves the inbox list; in All Mail it stays, no longer marked Inbox.
+  // One reported as spam leaves both.
+  rows = rows.filter(t => { const o = overrides.get(key(t)); return !o?.spam && (state.all || !o?.archive); }).map(t => {
     const o = overrides.get(key(t));
     if (o?.archive != null) t.in_inbox = !o.archive;
     if (o?.unread != null) t.unread = o.unread;
     if (o?.starred != null) t.starred = o.starred;
     return t;
   });
-  if (!state.all) for (const [k, o] of overrides) {
-    if (o.archive !== false || rows.some(t => key(t) === k)) continue;
+  for (const [k, o] of overrides) {
+    // put back by an undo: an archive in the inbox list, a spam report in either list
+    const back = o.spam === false || (o.archive === false && !state.all);
+    if (!back || rows.some(t => key(t) === k)) continue;
     const t = shown.find(x => key(x) === k);
     if (!t) continue;
     const at = rows.findIndex(x => x.date < t.date);
@@ -1874,13 +1877,13 @@ function act(op, list = targets(), { record = true } = {}) {
     const row = state.threads[index];
     const change = remember(k, { archive: op === "archive" ? true : op === "inbox" ? false : undefined,
       unread: op === "read" ? 0 : op === "unread" ? 1 : undefined,
-      starred: op === "star" ? true : op === "unstar" ? false : undefined });
-    if (op === "archive" && state.all) {
-      if (row) row.in_inbox = false;
-    } else if (op === "archive") {
+      starred: op === "star" ? true : op === "unstar" ? false : undefined, spam: op === "spam" ? true : undefined });
+    if (op === "spam" || (op === "archive" && !state.all)) {
       state.threads = state.threads.filter(x => key(x) !== k);
       // the view is kept (out of sight) for an undo to show again at once
       if (state.open?.key === k) hideView();
+    } else if (op === "archive") {
+      if (row) row.in_inbox = false;
     } else if (row) {
       if (op === "inbox") row.in_inbox = true;
       if (op === "read") row.unread = 0;
@@ -1896,13 +1899,14 @@ function act(op, list = targets(), { record = true } = {}) {
   }
   // Marking and starring leave the selection alone, so the same conversations can be marked
   // read and then archived. Archiving them is what ends it: they have gone from the list.
-  if (op === "archive" || op === "inbox") state.selected.clear();
+  if (op === "archive" || op === "inbox" || op === "spam") state.selected.clear();
   renderList();
   updateThreadBar();
   if (record) {
     const said = { archive: ["Archived.", "{n} conversations archived."], inbox: ["Moved to the inbox.", "{n} conversations moved to the inbox."],
       read: ["Marked read.", "{n} conversations marked read."], unread: ["Marked unread.", "{n} conversations marked unread."],
-      star: ["Starred.", "{n} conversations starred."], unstar: ["Unstarred.", "{n} conversations unstarred."] }[op];
+      star: ["Starred.", "{n} conversations starred."], unstar: ["Unstarred.", "{n} conversations unstarred."],
+      spam: ["Reported as spam.", "{n} conversations reported as spam."] }[op];
     if (said) toast(txn(list.length, ...said), { undo: true });
   }
 }
@@ -1912,29 +1916,32 @@ async function undo() {
   const last = lastAction;
   if (!last) return toast(tx("Nothing to undo."));
   lastAction = null;
-  if (last.op !== "archive") {
+  if (last.op !== "archive" && last.op !== "spam") {
     act(INVERSE[last.op], last.items.map(i => i.t), { record: false });
     return toast(tx("Undone."));
   }
   // Put the rows back where they were straight away, then tell the server. Until it has
-  // heard, a list arriving from it still has them archived and is corrected like any other.
+  // heard, a list arriving from it still has them archived (or gone) and is corrected like any
+  // other. A conversation back from spam is as it was until the server says otherwise.
+  const spam = last.op === "spam";
   const changed = new Map();
   for (const { t, index } of [...last.items].sort((a, b) => a.index - b.index)) {
-    changed.set(key(t), remember(key(t), { archive: false }));
+    changed.set(key(t), remember(key(t), spam ? { spam: false } : { archive: false }));
     if (!state.threads.some(x => key(x) === key(t))) state.threads.splice(Math.min(Math.max(index, 0), state.threads.length), 0, t);
-    t.in_inbox = true;
+    if (!spam) t.in_inbox = true;
   }
   renderList();
   updateThreadBar();
   const first = last.items[0];
   if (first) { setCursor(state.threads.findIndex(x => key(x) === key(first.t))); show(first.t); }
-  toast(txn(last.items.length, "Back in the inbox.", "{n} conversations back in the inbox."));
+  toast(spam ? txn(last.items.length, "No longer spam.", "{n} conversations no longer spam.")
+    : txn(last.items.length, "Back in the inbox.", "{n} conversations back in the inbox."));
   await Promise.allSettled(last.items.map(({ t, sent }) => {
     const k = key(t);
     // the archive request itself has to have landed first, which whenDone sees to
     return whenDone(k, async () => {
       const done = await sent;
-      if (done?.msgids?.length) await api("/api/unarchive", { body: { account_id: t.account_id, msgids: done.msgids } });
+      if (done?.msgids?.length) await api(spam ? "/api/unspam" : "/api/unarchive", { body: { account_id: t.account_id, msgids: done.msgids } });
     })
       .catch(e => { overrides.delete(k); toast(tx("Couldn't undo: {why}", { why: txServer(e.message) })); refreshSoon(); })
       .finally(() => settled(k, changed.get(k)));
@@ -1954,6 +1961,12 @@ function leaveConversation() {
 function archive() {
   act("archive");
   if (!state.all) leaveConversation();   // in All Mail the conversation is still listed: stay on it
+}
+
+/** Report as spam: Gmail moves it to Spam, so it leaves every list, All Mail included. */
+function reportSpam() {
+  act("spam");
+  leaveConversation();
 }
 
 /** Clear out everything in the inbox from one sender. One z brings it all back. `messages` is
@@ -2037,6 +2050,7 @@ $("#thread-bar").addEventListener("click", e => {
   if (a === "more") threadBarMenu(e.target.closest("button"));
   if (a === "archive") archive();
   if (a === "inbox") act("inbox");
+  if (a === "spam") reportSpam();
   if (a === "unread") markUnread();
   if (a === "star") toggleStar();
   if (a === "expand") expandAll();
@@ -2133,7 +2147,7 @@ function onKey(e) {
   if (SOLO) {
     // One conversation, no list: only the keys that make sense here.
     const solo = { n: () => focusMessage(state.open.focus + 1), p: () => focusMessage(state.open.focus - 1),
-      e: archive, s: toggleStar, U: markUnread, ";": () => expandAll(true), ":": () => expandAll(false), r: replyInGmail, Escape: closeWindow, u: closeWindow,
+      e: archive, "!": reportSpam, s: toggleStar, U: markUnread, ";": () => expandAll(true), ":": () => expandAll(false), r: replyInGmail, Escape: closeWindow, u: closeWindow,
       "?": () => $("#help-dialog").showModal() }[k];
     if (solo && state.open) { solo(); e.preventDefault(); }
     return;
@@ -2161,6 +2175,7 @@ function onKey(e) {
     case "n": if (state.open) focusMessage(state.open.focus + 1); break;
     case "p": if (state.open) focusMessage(state.open.focus - 1); break;
     case "e": archive(); break;
+    case "!": reportSpam(); break;
     case ";": expandAll(true); break;
     case ":": expandAll(false); break;
     case "s": toggleStar(); break;

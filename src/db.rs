@@ -233,7 +233,54 @@ impl Db {
                VALUES(new.id, new.subject, new.from_name, new.from_addr, new.body_text);
              END;",
         )?;
+        // Conversations reported as spam, set aside whole (bodies too) so an undo can put them
+        // back exactly. Undo lasts only while the app is open, so they start empty each time;
+        // made from `messages` as it is now, they always have its columns.
+        c.execute_batch(
+            "DROP TABLE IF EXISTS held_bodies;
+             DROP TABLE IF EXISTS held_messages;
+             CREATE TABLE held_messages AS SELECT * FROM messages WHERE 0;
+             CREATE TABLE held_bodies AS SELECT * FROM bodies WHERE 0;",
+        )?;
         Ok(db)
+    }
+
+    /// Take these messages out of the local copy, keeping them aside for `restore_held`.
+    pub fn hold(c: &Connection, account_id: i64, msgids: &[String]) -> Result<()> {
+        for msgid in msgids {
+            let row = "SELECT id FROM messages WHERE account_id=?1 AND gm_msgid=?2";
+            c.execute(&format!("DELETE FROM held_bodies WHERE message_id IN ({row})"), params![account_id, msgid])?;
+            c.execute("DELETE FROM held_messages WHERE account_id=? AND gm_msgid=?", params![account_id, msgid])?;
+            c.execute(&format!("INSERT INTO held_bodies SELECT * FROM bodies WHERE message_id IN ({row})"), params![account_id, msgid])?;
+            c.execute("INSERT INTO held_messages SELECT * FROM messages WHERE account_id=? AND gm_msgid=?", params![account_id, msgid])?;
+            c.execute("DELETE FROM messages WHERE account_id=? AND gm_msgid=?", params![account_id, msgid])?;
+        }
+        Ok(())
+    }
+
+    /// Put messages set aside by `hold` back. `to_inbox` puts them in the inbox with no UIDs
+    /// (the next sync finds them), for messages that have been out of Gmail's sight in Spam.
+    pub fn restore_held(c: &Connection, account_id: i64, msgids: &[String], to_inbox: bool) -> Result<()> {
+        for msgid in msgids {
+            let held = "SELECT id FROM held_messages WHERE account_id=?1 AND gm_msgid=?2";
+            // (a sync may have listed it again meanwhile; then that copy stands)
+            let back = c.execute(
+                "INSERT OR IGNORE INTO messages SELECT * FROM held_messages WHERE account_id=? AND gm_msgid=?",
+                params![account_id, msgid],
+            )?;
+            if back > 0 {
+                c.execute(&format!("INSERT OR IGNORE INTO bodies SELECT * FROM held_bodies WHERE message_id IN ({held})"), params![account_id, msgid])?;
+                if to_inbox {
+                    c.execute(
+                        "UPDATE messages SET in_inbox=1, uid=NULL, all_uid=NULL WHERE account_id=? AND gm_msgid=?",
+                        params![account_id, msgid],
+                    )?;
+                }
+            }
+            c.execute(&format!("DELETE FROM held_bodies WHERE message_id IN ({held})"), params![account_id, msgid])?;
+            c.execute("DELETE FROM held_messages WHERE account_id=? AND gm_msgid=?", params![account_id, msgid])?;
+        }
+        Ok(())
     }
 
     pub fn conn(&self) -> Result<Connection> {
@@ -314,9 +361,11 @@ impl Db {
     /// Insert a message we have not seen before. Existing rows are left alone.
     pub fn insert_message(c: &Connection, account_id: i64, m: &NewMessage) -> Result<()> {
         c.execute(
+            // (not while it is on its way to Spam: a sync running meanwhile still sees it)
             "INSERT OR IGNORE INTO messages(account_id, gm_msgid, gm_thrid, uid, in_inbox, seen, starred,
                                             date, size, from_name, from_addr, to_addrs, cc_addrs, subject)
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+             SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14
+              WHERE NOT EXISTS (SELECT 1 FROM pending WHERE account_id=?1 AND gm_msgid=?2 AND op='spam')",
             params![
                 account_id, m.gm_msgid, m.gm_thrid, m.uid, m.in_inbox, m.seen, m.starred, m.date, m.size,
                 m.from_name, m.from_addr, m.to_addrs, m.cc_addrs, m.subject
@@ -914,6 +963,38 @@ mod tests {
         // what the list and search go by is still there
         assert_eq!(c.query_row("SELECT body_text FROM messages WHERE gm_msgid='1'", [], |r| r.get::<_, String>(0)).unwrap(), "kept for search");
         assert_eq!(db.spare_bodies().unwrap(), (0, 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_conversation_reported_as_spam_is_set_aside_and_comes_back_whole() {
+        let dir = std::env::temp_dir().join(format!("unibox-test-spam-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(&dir.join("spam.db")).unwrap();
+        let id = db.add_account("a@example.com").unwrap();
+        let c = db.conn().unwrap();
+        let m = |msgid| NewMessage {
+            gm_msgid: msgid, gm_thrid: "10", uid: Some(7), in_inbox: true, seen: false, starred: false, date: 1, size: 0,
+            from_name: "Prize", from_addr: "win@prize.example", to_addrs: "", cc_addrs: "", subject: "You won",
+        };
+        Db::insert_message(&c, id, &m("1")).unwrap();
+        c.execute("INSERT INTO bodies(message_id, raw) SELECT id, x'0102' FROM messages WHERE gm_msgid='1'", []).unwrap();
+        let count = |sql: &str| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        let ids = ["1".to_string()];
+        Db::hold(&c, id, &ids).unwrap();
+        assert_eq!(count("SELECT COUNT(*) FROM messages"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM bodies"), 0);
+        // a sync that still sees it on Gmail does not bring it back while the report is on its way
+        c.execute("INSERT INTO pending(account_id, gm_msgid, op, uid) VALUES(?, '1', 'spam', 0)", [id]).unwrap();
+        Db::insert_message(&c, id, &m("1")).unwrap();
+        assert_eq!(count("SELECT COUNT(*) FROM messages"), 0);
+        // back from Spam on Gmail: in the inbox, under UIDs the next sync finds
+        Db::restore_held(&c, id, &ids, true).unwrap();
+        assert_eq!(count("SELECT COUNT(*) FROM messages WHERE in_inbox=1 AND uid IS NULL"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM bodies"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM held_messages"), 0);
+        // found by search again
+        assert_eq!(count("SELECT COUNT(*) FROM search WHERE search MATCH '\"prize\"'"), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

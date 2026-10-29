@@ -20,6 +20,9 @@ triage: replying opens the conversation in Gmail.
   be typed there too: `is:unread`, `from:people`, `from:automated`, `in:all`, and
   `from:` any sender, with suggestions as you type.
 - Archive, read/unread and star are written back to Gmail. `z` undoes.
+- Report spam (`!`) moves a whole conversation to Gmail's Spam folder, which is how Gmail is
+  told over IMAP, so it leaves the inbox and All mail. `z` takes it back out (into the inbox,
+  as Gmail's "Not spam" does). Gmail empties Spam after 30 days.
 - Gmail's keyboard shortcuts: `j`/`k`, `o`, `u`, `e`, `s`, `x`, `/` and the rest. Press `?`
   in the app for the list.
 - The unread count shows as a badge on the taskbar button and in the window title.
@@ -81,8 +84,8 @@ triage: replying opens the conversation in Gmail.
 A chat panel (Ctrl+K) backed by Claude. It persists between sessions, is told what the window
 is showing with each message, and works through five tools defined in `src/agent.rs`:
 read-only SQL over the mail cache, show a set of conversations in the list, read a
-conversation, archive / mark / star, and save a reply as a Gmail draft. It cannot send or
-delete. It changes mail only when your newest message names the change ("archive", "mark
+conversation, archive / mark / star, and save a reply as a Gmail draft. It cannot send,
+delete or report spam (Gmail deletes spam after 30 days, so that stays a key you press). It changes mail only when your newest message names the change ("archive", "mark
 read", "star", アーカイブ, 既読…): "ok" or "go ahead" gets a question back, and the app itself
 refuses an action whose word is not in that message. Errors are kept in the conversation so
 they can be looked at later.

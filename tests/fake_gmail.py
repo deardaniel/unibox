@@ -43,6 +43,7 @@ class Msg:
         self.raw = raw
         self.when = when
         self.inbox = inbox
+        self.spam = False
         self.flags = set()
         if seen:
             self.flags.add("\\Seen")
@@ -304,9 +305,11 @@ class Handler(socketserver.StreamRequestHandler):
                               '* LIST (\\HasChildren \\Noselect) "/" "[Gmail]"\r\n'
                               '* LIST (\\All \\HasNoChildren) "/" "[Gmail]/All Mail"\r\n'
                               '* LIST (\\Drafts \\HasNoChildren) "/" "[Gmail]/Drafts"\r\n'
+                              '* LIST (\\Junk \\HasNoChildren) "/" "[Gmail]/Spam"\r\n'
                               f"{tag} OK Success\r\n")
                 elif cmd in ("SELECT", "EXAMINE"):
-                    selected = "inbox" if args.strip('"').upper() == "INBOX" else "all"
+                    name = args.strip('"')
+                    selected = "inbox" if name.upper() == "INBOX" else "spam" if name.endswith("Spam") else "all"
                     msgs = self.visible(user, selected)
                     self.send(f"* FLAGS (\\Seen \\Flagged \\Deleted)\r\n* {len(msgs)} EXISTS\r\n"
                               f"* OK [UIDVALIDITY 7] UIDs valid\r\n{tag} OK [READ-WRITE] {args} selected. (Success)\r\n")
@@ -368,6 +371,21 @@ class Handler(socketserver.StreamRequestHandler):
                             msgs[uid].inbox = False
                         touch(user)
                         self.send(f"{tag} OK [COPYUID 7 {setstr} {setstr}] (Success)\r\n")
+                    elif selected != "spam" and dest.endswith('Spam"'):
+                        # into Spam from anywhere: it leaves every label, the inbox included
+                        for uid in parse_set(setstr, list(msgs)):
+                            msgs[uid].spam, msgs[uid].inbox = True, False
+                        touch(user)
+                        self.send(f"{tag} OK [COPYUID 7 {setstr} {setstr}] (Success)\r\n")
+                    elif selected == "spam" and dest.strip('"').upper() == "INBOX":
+                        # "Not spam": back in the inbox, under new UIDs
+                        for uid in parse_set(setstr, list(msgs)):
+                            m = msgs[uid]
+                            m.spam, m.inbox = False, True
+                            m.uid_inbox += 5000
+                            m.uid_all = max(x.uid_all for x in box(user)) + 1
+                        touch(user)
+                        self.send(f"{tag} OK [COPYUID 7 {setstr} {setstr}] (Success)\r\n")
                     else:
                         self.send(f"{tag} NO [TRYCREATE] No folder {dest} (Failure)\r\n")
                 elif cmd == "XDELIVER":
@@ -404,8 +422,10 @@ class Handler(socketserver.StreamRequestHandler):
     def visible(user, selected):
         msgs = box(user)
         if selected == "inbox":
-            return {m.uid_inbox: m for m in msgs if m.inbox}
-        return {m.uid_all: m for m in msgs}
+            return {m.uid_inbox: m for m in msgs if m.inbox and not m.spam}
+        if selected == "spam":
+            return {m.uid_all: m for m in msgs if m.spam}
+        return {m.uid_all: m for m in msgs if not m.spam}
 
     def fetch(self, seq, uid, m, items):
         date = datetime.fromtimestamp(m.when, timezone.utc).strftime("%d-%b-%Y %H:%M:%S +0000")
